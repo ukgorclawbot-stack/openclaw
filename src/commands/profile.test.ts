@@ -345,6 +345,8 @@ describe("profile commands", () => {
 
     const managed = await readManagedProfile("legacy", process.env, () => root);
     expect(managed?.warnings.join("\n")).toContain("escapes adopted legacy root");
+    expect(managed?.stateDir).toBe("/tmp/escape-state");
+    expect(managed?.configPath).toBe(path.join(legacyRoot, "openclaw.json"));
   });
 
   it("refuses to create a managed profile when a same-id legacy profile exists", async () => {

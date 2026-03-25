@@ -344,6 +344,43 @@ function buildInvalidManagedProfile(params: {
   });
 }
 
+function buildInvalidResolvedManagedProfileFromSpec(
+  spec: ProfileSpec,
+  profileRoot: string,
+  manifestPath: string,
+  warning: string,
+): ResolvedProfile {
+  const preserveDeclaredRoots = Boolean(spec.adoptedFromLegacy);
+  const allowAbsolute = preserveDeclaredRoots;
+  const configPath = preserveDeclaredRoots
+    ? resolveProfileComponentPath(profileRoot, spec.roots.config, { allowAbsolute })
+    : path.join(profileRoot, "config", CONFIG_FILENAME);
+  const stateDir = preserveDeclaredRoots
+    ? resolveProfileComponentPath(profileRoot, spec.roots.state, { allowAbsolute })
+    : path.join(profileRoot, "state");
+  const workspaceDir = preserveDeclaredRoots
+    ? resolveProfileComponentPath(profileRoot, spec.roots.workspace, { allowAbsolute })
+    : path.join(profileRoot, "workspace");
+  return buildResolvedProfile({
+    id: spec.id,
+    kind: "managed",
+    mode: spec.adoptedFromLegacy ? "adopted-legacy" : "managed-native",
+    profileRoot,
+    manifestPath,
+    configPath,
+    stateDir,
+    workspaceDir,
+    basePort: spec.network.basePort,
+    configuredGatewayPort: undefined,
+    exists: true,
+    managed: true,
+    createdAt: spec.createdAt,
+    createdFrom: spec.createdFrom,
+    adoptedFromLegacy: spec.adoptedFromLegacy,
+    warnings: [warning],
+  });
+}
+
 export function hasInvalidManagedManifest(profile: ResolvedProfile | null | undefined): boolean {
   return Boolean(
     profile?.managed &&
@@ -379,24 +416,12 @@ export async function readManagedProfile(
     );
     return buildResolvedManagedProfile(spec, profileRoot, configuredGatewayPort);
   } catch (err) {
-    return buildResolvedProfile({
-      id: spec.id,
-      kind: "managed",
-      mode: spec.adoptedFromLegacy ? "adopted-legacy" : "managed-native",
+    return buildInvalidResolvedManagedProfileFromSpec(
+      spec,
       profileRoot,
       manifestPath,
-      configPath: path.join(profileRoot, "config", CONFIG_FILENAME),
-      stateDir: path.join(profileRoot, "state"),
-      workspaceDir: path.join(profileRoot, "workspace"),
-      basePort: spec.network.basePort,
-      configuredGatewayPort: undefined,
-      exists: true,
-      managed: true,
-      createdAt: spec.createdAt,
-      createdFrom: spec.createdFrom,
-      adoptedFromLegacy: spec.adoptedFromLegacy,
-      warnings: [`Invalid profile manifest: ${String(err)}`],
-    });
+      `Invalid profile manifest: ${String(err)}`,
+    );
   }
 }
 
@@ -426,24 +451,12 @@ export function readManagedProfileSync(
     );
     return buildResolvedManagedProfile(spec, profileRoot, configuredGatewayPort);
   } catch (err) {
-    return buildResolvedProfile({
-      id: spec.id,
-      kind: "managed",
-      mode: spec.adoptedFromLegacy ? "adopted-legacy" : "managed-native",
+    return buildInvalidResolvedManagedProfileFromSpec(
+      spec,
       profileRoot,
       manifestPath,
-      configPath: path.join(profileRoot, "config", CONFIG_FILENAME),
-      stateDir: path.join(profileRoot, "state"),
-      workspaceDir: path.join(profileRoot, "workspace"),
-      basePort: spec.network.basePort,
-      configuredGatewayPort: undefined,
-      exists: true,
-      managed: true,
-      createdAt: spec.createdAt,
-      createdFrom: spec.createdFrom,
-      adoptedFromLegacy: spec.adoptedFromLegacy,
-      warnings: [`Invalid profile manifest: ${String(err)}`],
-    });
+      `Invalid profile manifest: ${String(err)}`,
+    );
   }
 }
 
