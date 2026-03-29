@@ -16,7 +16,7 @@ vi.mock("./src/cli.js", async (importOriginal) => {
 import matrixPlugin from "./index.js";
 
 describe("matrix plugin", () => {
-  it("registers matrix CLI synchronously", () => {
+  it("registers matrix CLI through a descriptor-backed lazy registrar", async () => {
     const registerCli = vi.fn();
     const api = createTestPluginApi({
       id: "matrix",
@@ -30,13 +30,22 @@ describe("matrix plugin", () => {
     matrixPlugin.register(api);
 
     const registrar = registerCli.mock.calls[0]?.[0];
-    expect(registerCli).toHaveBeenCalledWith(expect.any(Function), { commands: ["matrix"] });
+    expect(registerCli).toHaveBeenCalledWith(expect.any(Function), {
+      descriptors: [
+        {
+          name: "matrix",
+          description: "Manage Matrix accounts, verification, devices, and profile state",
+          hasSubcommands: true,
+        },
+      ],
+    });
     expect(typeof registrar).toBe("function");
+    expect(cliMocks.registerMatrixCli).not.toHaveBeenCalled();
 
     const program = { command: vi.fn() };
     const result = registrar?.({ program } as never);
 
-    expect(result).toBeUndefined();
+    await result;
     expect(cliMocks.registerMatrixCli).toHaveBeenCalledWith({ program });
   });
 });

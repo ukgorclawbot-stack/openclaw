@@ -213,7 +213,7 @@ export async function runCli(argv: string[] = process.argv) {
         await import("./program/register.subclis.js");
       const config = await loadValidatedConfigForPluginRegistration();
       if (config) {
-        registerPluginCliCommands(program, config);
+        registerPluginCliCommands(program, config, undefined, undefined, { mode: "lazy" });
         if (
           primary === "browser" &&
           !program.commands.some((command) => command.name() === "browser")

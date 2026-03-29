@@ -1,5 +1,7 @@
 import type { Command } from "commander";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { reparseProgramFromActionArgs } from "../cli/program/action-reparse.js";
+import { removeCommandByName } from "../cli/program/command-tree.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { loadConfig } from "../config/config.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
@@ -9,6 +11,12 @@ import type { OpenClawPluginCliCommandDescriptor } from "./types.js";
 import type { PluginLogger } from "./types.js";
 
 const log = createSubsystemLogger("plugins");
+
+type PluginCliRegistrationMode = "eager" | "lazy";
+
+type RegisterPluginCliOptions = {
+  mode?: PluginCliRegistrationMode;
+};
 
 function loadPluginCliRegistry(
   cfg?: OpenClawConfig,
@@ -69,8 +77,10 @@ export function registerPluginCliCommands(
   cfg?: OpenClawConfig,
   env?: NodeJS.ProcessEnv,
   loaderOptions?: Pick<PluginLoadOptions, "pluginSdkResolution">,
+  options?: RegisterPluginCliOptions,
 ) {
   const { config, workspaceDir, logger, registry } = loadPluginCliRegistry(cfg, env, loaderOptions);
+  const mode = options?.mode ?? "eager";
 
   const existingCommands = new Set(program.commands.map((cmd) => cmd.name()));
 
@@ -87,16 +97,33 @@ export function registerPluginCliCommands(
       }
     }
     try {
-      const result = entry.register({
-        program,
-        config,
-        workspaceDir,
-        logger,
-      });
-      if (result && typeof result.then === "function") {
-        void result.catch((err) => {
-          log.warn(`plugin CLI register failed (${entry.pluginId}): ${String(err)}`);
+      const registerEntry = () =>
+        entry.register({
+          program,
+          config,
+          workspaceDir,
+          logger,
         });
+      if (mode === "lazy" && entry.descriptors.length > 0) {
+        for (const descriptor of entry.descriptors) {
+          const placeholder = program.command(descriptor.name).description(descriptor.description);
+          placeholder.allowUnknownOption(true);
+          placeholder.allowExcessArguments(true);
+          placeholder.action(async (...actionArgs) => {
+            for (const command of entry.commands) {
+              removeCommandByName(program, command);
+            }
+            await registerEntry();
+            await reparseProgramFromActionArgs(program, actionArgs);
+          });
+        }
+      } else {
+        const result = registerEntry();
+        if (result && typeof result.then === "function") {
+          void result.catch((err) => {
+            log.warn(`plugin CLI register failed (${entry.pluginId}): ${String(err)}`);
+          });
+        }
       }
       for (const command of entry.commands) {
         existingCommands.add(command);

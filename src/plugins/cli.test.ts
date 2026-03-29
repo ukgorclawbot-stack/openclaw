@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   otherRegister: vi.fn(),
   loadOpenClawPlugins: vi.fn(),
   applyPluginAutoEnable: vi.fn(),
+  reparseProgramFromActionArgs: vi.fn(),
 }));
 
 vi.mock("./loader.js", () => ({
@@ -15,6 +16,10 @@ vi.mock("./loader.js", () => ({
 
 vi.mock("../config/plugin-auto-enable.js", () => ({
   applyPluginAutoEnable: (...args: unknown[]) => mocks.applyPluginAutoEnable(...args),
+}));
+
+vi.mock("../cli/program/action-reparse.js", () => ({
+  reparseProgramFromActionArgs: (...args: unknown[]) => mocks.reparseProgramFromActionArgs(...args),
 }));
 
 import { registerPluginCliCommands } from "./cli.js";
@@ -34,12 +39,14 @@ function createCliRegistry() {
         pluginId: "memory-core",
         register: mocks.memoryRegister,
         commands: ["memory"],
+        descriptors: [],
         source: "bundled",
       },
       {
         pluginId: "other",
         register: mocks.otherRegister,
         commands: ["other"],
+        descriptors: [],
         source: "bundled",
       },
     ],
@@ -107,6 +114,8 @@ describe("registerPluginCliCommands", () => {
     mocks.loadOpenClawPlugins.mockReturnValue(createCliRegistry());
     mocks.applyPluginAutoEnable.mockReset();
     mocks.applyPluginAutoEnable.mockImplementation(({ config }) => ({ config, changes: [] }));
+    mocks.reparseProgramFromActionArgs.mockReset();
+    mocks.reparseProgramFromActionArgs.mockResolvedValue(undefined);
   });
 
   it("skips plugin CLI registrars when commands already exist", () => {
@@ -144,5 +153,44 @@ describe("registerPluginCliCommands", () => {
 
     expectAutoEnabledCliLoad({ rawConfig, autoEnabledConfig });
     expectCliRegistrarCalledWithConfig(autoEnabledConfig);
+  });
+
+  it("registers descriptor-backed plugin commands lazily when requested", async () => {
+    mocks.loadOpenClawPlugins.mockReturnValue({
+      cliRegistrars: [
+        {
+          pluginId: "memory-core",
+          register: ({ program }: { program: Command }) => {
+            mocks.memoryRegister();
+            program.command("memory").action(() => {});
+          },
+          commands: ["memory"],
+          descriptors: [
+            {
+              name: "memory",
+              description: "Search, inspect, and reindex memory files",
+              hasSubcommands: true,
+            },
+          ],
+          source: "bundled",
+        },
+      ],
+    });
+
+    const program = createProgram();
+    registerPluginCliCommands(program, {} as OpenClawConfig, undefined, undefined, {
+      mode: "lazy",
+    });
+
+    expect(mocks.memoryRegister).not.toHaveBeenCalled();
+    expect(program.commands.map((command) => command.name())).toContain("memory");
+
+    const placeholder = program.commands.find((command) => command.name() === "memory") as
+      | (Command & { _actionHandler?: (...args: unknown[]) => Promise<void> | void })
+      | undefined;
+    await placeholder?._actionHandler?.(placeholder);
+
+    expect(mocks.memoryRegister).toHaveBeenCalledTimes(1);
+    expect(mocks.reparseProgramFromActionArgs).toHaveBeenCalledTimes(1);
   });
 });
