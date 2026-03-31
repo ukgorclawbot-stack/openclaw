@@ -395,7 +395,7 @@ describe("buildInboundContextSidecar", () => {
     expect(messageText(projected[2])).toContain("x".repeat(1_200));
   });
 
-  it("keeps a lightweight forwarded block on older sidecar turns before dropping it entirely", () => {
+  it("keeps a lightweight forwarded block on older sidecar turns", () => {
     const repeatedSignature = `sig ${"x".repeat(2_500)}`;
     const messages = [
       {

@@ -8,6 +8,7 @@ import type { AgentCompactionIdentifierPolicy } from "../config/types.agent-defa
 import { retryAsync } from "../infra/retry.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
+import { isLikelyContextOverflowError } from "./pi-embedded-helpers/errors.js";
 import { repairToolUseResultPairing, stripToolResultDetails } from "./session-transcript-repair.js";
 
 const log = createSubsystemLogger("compaction");
@@ -17,6 +18,7 @@ export const MIN_CHUNK_RATIO = 0.15;
 export const SAFETY_MARGIN = 1.2; // 20% buffer for estimateTokens() inaccuracy
 const DEFAULT_SUMMARY_FALLBACK = "No prior history.";
 const DEFAULT_PARTS = 2;
+const MAX_SUMMARIZATION_PTL_RETRIES = 3;
 const MERGE_SUMMARIES_INSTRUCTIONS = [
   "Merge these partial summaries into a single cohesive summary.",
   "",
@@ -106,11 +108,136 @@ function estimateCompactionMessageTokens(message: AgentMessage): number {
   return estimateMessagesTokens([message]);
 }
 
+function replaceCompactionMediaBlocks(content: unknown): unknown {
+  if (!Array.isArray(content)) {
+    return content;
+  }
+
+  let touched = false;
+  const next = content.flatMap((block) => {
+    if (!block || typeof block !== "object") {
+      return [block];
+    }
+    const type = (block as { type?: unknown }).type;
+    if (type === "image") {
+      touched = true;
+      return [{ type: "text", text: "[image]" }];
+    }
+    if (type === "document") {
+      touched = true;
+      return [{ type: "text", text: "[document]" }];
+    }
+    return [block];
+  });
+
+  return touched ? next : content;
+}
+
+function stripCompactionMedia(messages: AgentMessage[]): AgentMessage[] {
+  let touched = false;
+  const next = messages.map((message) => {
+    const record = message as unknown as Record<string, unknown>;
+    if (!Object.hasOwn(record, "content")) {
+      return message;
+    }
+
+    const content = record["content"];
+    const sanitizedContent = replaceCompactionMediaBlocks(content);
+    if (sanitizedContent === content) {
+      return message;
+    }
+
+    touched = true;
+    return {
+      ...record,
+      content: sanitizedContent,
+    } as AgentMessage;
+  });
+
+  return touched ? next : messages;
+}
+
 function normalizeParts(parts: number, messageCount: number): number {
   if (!Number.isFinite(parts) || parts <= 1) {
     return 1;
   }
   return Math.min(Math.max(1, Math.floor(parts)), Math.max(1, messageCount));
+}
+
+function groupMessagesByCompactionRound(messages: AgentMessage[]): AgentMessage[][] {
+  const groups: AgentMessage[][] = [];
+  let currentRound: AgentMessage[] = [];
+  let hasSeenAssistant = false;
+
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      // Claude Code prunes at API-round boundaries. OpenClaw transcripts do not
+      // carry assistant response ids, so the start of each assistant message is
+      // the closest stable proxy for keeping a tool call/result round intact.
+      if (currentRound.length > 0) {
+        groups.push(currentRound);
+      }
+      currentRound = [message];
+      hasSeenAssistant = true;
+      continue;
+    }
+
+    if (!hasSeenAssistant) {
+      groups.push([message]);
+      continue;
+    }
+
+    currentRound.push(message);
+  }
+
+  if (currentRound.length > 0) {
+    groups.push(currentRound);
+  }
+
+  return groups;
+}
+
+function splitCompactionRoundsByTokenShare(
+  messages: AgentMessage[],
+  parts = DEFAULT_PARTS,
+): AgentMessage[][] {
+  const groups = groupMessagesByCompactionRound(messages);
+  if (groups.length === 0) {
+    return [];
+  }
+
+  const normalizedParts = normalizeParts(parts, groups.length);
+  if (normalizedParts <= 1) {
+    return [messages];
+  }
+
+  const totalTokens = estimateMessagesTokens(messages);
+  const targetTokens = totalTokens / normalizedParts;
+  const chunks: AgentMessage[][] = [];
+  let current: AgentMessage[] = [];
+  let currentTokens = 0;
+
+  for (const group of groups) {
+    const groupTokens = estimateMessagesTokens(group);
+    if (
+      chunks.length < normalizedParts - 1 &&
+      current.length > 0 &&
+      currentTokens + groupTokens > targetTokens
+    ) {
+      chunks.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+
+    current.push(...group);
+    currentTokens += groupTokens;
+  }
+
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 export function splitMessagesByTokenShare(
@@ -251,8 +378,8 @@ async function summarizeChunks(params: {
     return params.previousSummary ?? DEFAULT_SUMMARY_FALLBACK;
   }
 
-  // SECURITY: never feed toolResult.details into summarization prompts.
-  const safeMessages = stripToolResultDetails(params.messages);
+  // SECURITY: never feed toolResult.details or raw media payloads into summarization prompts.
+  const safeMessages = stripCompactionMedia(stripToolResultDetails(params.messages));
   const chunks = chunkMessagesByMaxTokens(safeMessages, params.maxChunkTokens);
   let summary = params.previousSummary;
   const effectiveInstructions = buildCompactionSummarizationInstructions(
@@ -278,7 +405,12 @@ async function summarizeChunks(params: {
         maxDelayMs: 5000,
         jitter: 0.2,
         label: "compaction/generateSummary",
-        shouldRetry: (err) => !(err instanceof Error && err.name === "AbortError"),
+        shouldRetry: (err) => {
+          if (err instanceof Error && err.name === "AbortError") {
+            return false;
+          }
+          return !isLikelyContextOverflowError(getCompactionErrorMessage(err));
+        },
       },
     );
   }
@@ -319,6 +451,24 @@ function generateSummary(
   );
 }
 
+function getCompactionErrorMessage(error: unknown): string | undefined {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return typeof error === "string" ? error : undefined;
+}
+
+function truncateHeadForSummarizationRetry(messages: AgentMessage[]): AgentMessage[] | null {
+  const groups = groupMessagesByCompactionRound(messages);
+  if (groups.length < 2) {
+    return null;
+  }
+
+  const dropCount = Math.max(1, Math.floor(groups.length * 0.2));
+  const kept = groups.slice(Math.min(dropCount, groups.length - 1)).flat();
+  return kept.length > 0 ? kept : null;
+}
+
 /**
  * Summarize with progressive fallback for handling oversized messages.
  * If full summarization fails, tries partial summarization excluding oversized messages.
@@ -342,9 +492,40 @@ export async function summarizeWithFallback(params: {
     return params.previousSummary ?? DEFAULT_SUMMARY_FALLBACK;
   }
 
-  // Try full summarization first
+  let messagesToSummarize = messages;
+  let ptlAttempts = 0;
+
+  // Try full summarization first, truncating the oldest assistant round when
+  // the summarization request itself overflows the model context window.
   try {
-    return await summarizeChunks(params);
+    for (;;) {
+      try {
+        return await summarizeChunks({
+          ...params,
+          messages: messagesToSummarize,
+        });
+      } catch (fullError) {
+        const errorMessage = getCompactionErrorMessage(fullError);
+        if (!isLikelyContextOverflowError(errorMessage)) {
+          throw fullError;
+        }
+
+        const truncated =
+          ptlAttempts < MAX_SUMMARIZATION_PTL_RETRIES
+            ? truncateHeadForSummarizationRetry(messagesToSummarize)
+            : null;
+        if (!truncated) {
+          throw fullError;
+        }
+
+        ptlAttempts++;
+        log.warn(
+          `Summarization hit context overflow, truncating oldest compaction round and retrying ` +
+            `(attempt ${ptlAttempts}): ${errorMessage ?? "unknown error"}`,
+        );
+        messagesToSummarize = truncated;
+      }
+    }
   } catch (fullError) {
     log.warn(
       `Full summarization failed, trying partial: ${
@@ -357,7 +538,7 @@ export async function summarizeWithFallback(params: {
   const smallMessages: AgentMessage[] = [];
   const oversizedNotes: string[] = [];
 
-  for (const msg of messages) {
+  for (const msg of messagesToSummarize) {
     if (isOversizedForSummary(msg, contextWindow)) {
       const role = (msg as { role?: string }).role ?? "message";
       const tokens = estimateCompactionMessageTokens(msg);
@@ -388,7 +569,7 @@ export async function summarizeWithFallback(params: {
 
   // Final fallback: Just note what was there
   return (
-    `Context contained ${messages.length} messages (${oversizedNotes.length} oversized). ` +
+    `Context contained ${messagesToSummarize.length} messages (${oversizedNotes.length} oversized). ` +
     `Summary unavailable due to size limits.`
   );
 }
@@ -484,7 +665,7 @@ export function pruneHistoryForContextShare(params: {
   const parts = normalizeParts(params.parts ?? DEFAULT_PARTS, keptMessages.length);
 
   while (keptMessages.length > 0 && estimateMessagesTokens(keptMessages) > budgetTokens) {
-    const chunks = splitMessagesByTokenShare(keptMessages, parts);
+    const chunks = splitCompactionRoundsByTokenShare(keptMessages, parts);
     if (chunks.length <= 1) {
       break;
     }

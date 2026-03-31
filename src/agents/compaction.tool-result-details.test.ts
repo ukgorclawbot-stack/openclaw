@@ -82,6 +82,37 @@ describe("compaction toolResult details stripping", () => {
     expect(serialized).not.toContain('"details"');
   });
 
+  it("replaces image content with text markers before generateSummary", async () => {
+    const messages: AgentMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "image", data: "abc", mimeType: "image/png" },
+          { type: "text", text: "caption" },
+        ],
+        timestamp: 1,
+      } as AgentMessage,
+    ];
+
+    const summary = await summarizeWithFallback({
+      messages,
+      model: { id: "mock", name: "mock", contextWindow: 10000, maxTokens: 1000 } as never,
+      apiKey: "test", // pragma: allowlist secret
+      signal: new AbortController().signal,
+      reserveTokens: 100,
+      maxChunkTokens: 5000,
+      contextWindow: 10000,
+    });
+
+    expect(summary).toBe("summary");
+    const chunk = (
+      piCodingAgentMocks.generateSummary.mock.calls as unknown as Array<[unknown]>
+    )[0]?.[0];
+    const serialized = JSON.stringify(chunk);
+    expect(serialized).toContain("[image]");
+    expect(serialized).not.toContain('"type":"image"');
+  });
+
   it("ignores toolResult.details when evaluating oversized messages", () => {
     piCodingAgentMocks.estimateTokens.mockImplementation((message: unknown) => {
       const record = message as { details?: unknown };
