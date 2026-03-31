@@ -6,6 +6,7 @@ import {
   serializeLegacyInboundContextPrefix,
 } from "../auto-reply/reply/context-sidecar.js";
 import { delegateCompactionToRuntime } from "./delegate.js";
+import { LEGACY_CONTEXT_ENGINE_ID, SESSION_CONTEXT_V2_ENGINE_ID } from "./ids.js";
 import { registerContextEngineForOwner } from "./registry.js";
 import type {
   ContextEngine,
@@ -17,8 +18,8 @@ import type {
 } from "./types.js";
 
 /**
- * LegacyContextEngine wraps the existing compaction behavior behind the
- * ContextEngine interface, preserving 100% backward compatibility.
+ * SessionContextV2Engine keeps sidecar-backed context management behind the
+ * ContextEngine interface while preserving legacy transcript compatibility.
  *
  * - ingest: no-op (SessionManager handles message persistence)
  * - assemble: projects older sidecar-backed turns inline, but routes the latest
@@ -26,11 +27,11 @@ import type {
  *   coupled to transcript storage
  * - compact: delegates to compactEmbeddedPiSessionDirect
  */
-export class LegacyContextEngine implements ContextEngine {
+export class SessionContextV2Engine implements ContextEngine {
   readonly info: ContextEngineInfo = {
-    id: "legacy",
-    name: "Legacy Context Engine",
-    version: "1.0.0",
+    id: SESSION_CONTEXT_V2_ENGINE_ID,
+    name: "Session Context V2 Engine",
+    version: "2.0.0",
   };
 
   async ingest(_params: {
@@ -106,8 +107,27 @@ export class LegacyContextEngine implements ContextEngine {
   }
 }
 
+export class LegacyContextEngine extends SessionContextV2Engine {
+  override readonly info: ContextEngineInfo = {
+    id: LEGACY_CONTEXT_ENGINE_ID,
+    name: "Legacy Context Engine",
+    version: "1.0.0",
+  };
+}
+
+export function registerSessionContextV2Engine(): void {
+  registerContextEngineForOwner(
+    SESSION_CONTEXT_V2_ENGINE_ID,
+    () => new SessionContextV2Engine(),
+    "core",
+    {
+      allowSameOwnerRefresh: true,
+    },
+  );
+}
+
 export function registerLegacyContextEngine(): void {
-  registerContextEngineForOwner("legacy", () => new LegacyContextEngine(), "core", {
+  registerContextEngineForOwner(LEGACY_CONTEXT_ENGINE_ID, () => new LegacyContextEngine(), "core", {
     allowSameOwnerRefresh: true,
   });
 }

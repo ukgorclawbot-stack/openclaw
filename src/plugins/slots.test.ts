@@ -195,10 +195,10 @@ describe("applyExclusiveSlotSelection", () => {
   it("applies slot selection for each kind in a multi-kind array", () => {
     const config: OpenClawConfig = {
       plugins: {
-        slots: { memory: "memory-core", contextEngine: "legacy" },
+        slots: { memory: "memory-core", contextEngine: "session-context-v2" },
         entries: {
           "memory-core": { enabled: true },
-          legacy: { enabled: true },
+          "session-context-v2": { enabled: true },
         },
       },
     };
@@ -208,7 +208,7 @@ describe("applyExclusiveSlotSelection", () => {
       selectedKind: ["memory", "context-engine"],
       registry: buildSelectionRegistry([
         { id: "memory-core", kind: "memory" },
-        { id: "legacy", kind: "context-engine" },
+        { id: "session-context-v2", kind: "context-engine" },
         { id: "dual-plugin", kind: ["memory", "context-engine"] },
       ]),
     });
@@ -216,7 +216,7 @@ describe("applyExclusiveSlotSelection", () => {
     expect(result.config.plugins?.slots?.memory).toBe("dual-plugin");
     expect(result.config.plugins?.slots?.contextEngine).toBe("dual-plugin");
     expect(result.config.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
-    expect(result.config.plugins?.entries?.legacy?.enabled).toBe(false);
+    expect(result.config.plugins?.entries?.["session-context-v2"]?.enabled).toBe(false);
   });
 
   it("does not disable a dual-kind plugin that still owns another slot", () => {
@@ -244,12 +244,12 @@ describe("applyExclusiveSlotSelection", () => {
   });
 
   it("does not disable a dual-kind plugin that owns another slot via default", () => {
-    // contextEngine is NOT explicitly set — defaults to "legacy"
+    // contextEngine is NOT explicitly set — defaults to "session-context-v2"
     const config: OpenClawConfig = {
       plugins: {
-        slots: { memory: "legacy" },
+        slots: { memory: "session-context-v2" },
         entries: {
-          legacy: { enabled: true },
+          "session-context-v2": { enabled: true },
         },
       },
     };
@@ -258,14 +258,14 @@ describe("applyExclusiveSlotSelection", () => {
       selectedId: "new-memory",
       selectedKind: "memory",
       registry: buildSelectionRegistry([
-        { id: "legacy", kind: ["memory", "context-engine"] },
+        { id: "session-context-v2", kind: ["memory", "context-engine"] },
         { id: "new-memory", kind: "memory" },
       ]),
     });
     expect(result.changed).toBe(true);
     expect(result.config.plugins?.slots?.memory).toBe("new-memory");
-    // legacy still owns contextEngine via default — must NOT be disabled
-    expect(result.config.plugins?.entries?.legacy?.enabled).not.toBe(false);
+    // session-context-v2 still owns contextEngine via default — must NOT be disabled
+    expect(result.config.plugins?.entries?.["session-context-v2"]?.enabled).not.toBe(false);
   });
 });
 

@@ -14,8 +14,22 @@
 
 import { z } from "zod";
 import { safeParseJsonWithSchema } from "../../utils/zod-parse.js";
+import { normalizeContextSidecar } from "./context-sidecar.js";
 
 const LEADING_TIMESTAMP_PREFIX_RE = /^\[[A-Za-z]{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2}[^\]]*\] */;
+
+function stripLeadingTimestampPrefix(text: string): string {
+  return text.replace(LEADING_TIMESTAMP_PREFIX_RE, "");
+}
+
+function hasStructuredContextSidecar(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  return (
+    normalizeContextSidecar((message as Record<string, unknown>)["contextSidecar"]) !== undefined
+  );
+}
 
 /**
  * Sentinel strings that identify the start of an injected metadata block.
@@ -129,7 +143,7 @@ export function stripInboundMetadata(text: string): string {
     return text;
   }
 
-  const withoutTimestamp = text.replace(LEADING_TIMESTAMP_PREFIX_RE, "");
+  const withoutTimestamp = stripLeadingTimestampPrefix(text);
   if (!SENTINEL_FAST_RE.test(withoutTimestamp)) {
     return withoutTimestamp;
   }
@@ -236,6 +250,22 @@ export function stripLeadingInboundMetadata(text: string): string {
 
   const strippedRemainder = stripTrailingUntrustedContextSuffix(lines.slice(index));
   return strippedRemainder.join("\n");
+}
+
+export function stripVisibleUserText(
+  text: string,
+  message?: unknown,
+  opts?: { leadingOnly?: boolean },
+): string {
+  if (!text) {
+    return text;
+  }
+  if (hasStructuredContextSidecar(message)) {
+    return stripLeadingTimestampPrefix(text);
+  }
+  return opts?.leadingOnly === true
+    ? stripLeadingInboundMetadata(text)
+    : stripInboundMetadata(text);
 }
 
 export function extractInboundSenderLabel(text: string): string | null {

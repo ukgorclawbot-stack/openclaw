@@ -7,7 +7,11 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 // group when needed.  For most groups we use the shared singleton directly.
 // ---------------------------------------------------------------------------
 import { delegateCompactionToRuntime } from "./delegate.js";
-import { LegacyContextEngine, registerLegacyContextEngine } from "./legacy.js";
+import {
+  LegacyContextEngine,
+  registerLegacyContextEngine,
+  registerSessionContextV2Engine,
+} from "./legacy.js";
 import {
   registerContextEngine,
   registerContextEngineForOwner,
@@ -464,7 +468,20 @@ describe("Registry tests", () => {
     expect(getContextEngineFactory("public-owner-guard")).toBe(ownedFactory);
   });
 
-  it("public registerContextEngine reserves the default legacy id", () => {
+  it("public registerContextEngine reserves the core-owned v2 and legacy ids", () => {
+    const v2Attempt = (
+      registerContextEngine as unknown as (
+        id: string,
+        factory: ContextEngineFactory,
+        opts?: { owner?: string },
+      ) => ContextEngineRegistrationResult
+    )("session-context-v2", () => new MockContextEngine(), { owner: "core" });
+
+    expect(v2Attempt).toEqual({
+      ok: false,
+      existingOwner: "core",
+    });
+
     const legacyAttempt = (
       registerContextEngine as unknown as (
         id: string,
@@ -610,6 +627,7 @@ describe("Default engine selection", () => {
   // Ensure both legacy and a custom test engine are registered before these tests.
   beforeEach(() => {
     // Registration is idempotent (Map.set), so calling again is safe.
+    registerSessionContextV2Engine();
     registerLegacyContextEngine();
     // Register a lightweight custom stub so we don't need external resources.
     registerContextEngine("test-engine", () => {
@@ -629,9 +647,9 @@ describe("Default engine selection", () => {
     });
   });
 
-  it("resolveContextEngine() with no config returns the default ('legacy') engine", async () => {
+  it("resolveContextEngine() with no config returns the default ('session-context-v2') engine", async () => {
     const engine = await resolveContextEngine();
-    expect(engine.info.id).toBe("legacy");
+    expect(engine.info.id).toBe("session-context-v2");
   });
 
   it("resolveContextEngine() with config contextEngine='legacy' returns legacy engine", async () => {
@@ -795,13 +813,14 @@ describe("assemble() prompt forwarding", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("Initialization guard", () => {
-  it("ensureContextEnginesInitialized() is idempotent and registers legacy", async () => {
+  it("ensureContextEnginesInitialized() is idempotent and registers built-in v2 plus legacy", async () => {
     const { ensureContextEnginesInitialized } = await import("./init.js");
 
     expect(() => ensureContextEnginesInitialized()).not.toThrow();
     expect(() => ensureContextEnginesInitialized()).not.toThrow();
 
     const ids = listContextEngineIds();
+    expect(ids).toContain("session-context-v2");
     expect(ids).toContain("legacy");
   });
 });

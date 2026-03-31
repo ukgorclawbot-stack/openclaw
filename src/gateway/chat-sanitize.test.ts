@@ -87,6 +87,23 @@ describe("stripEnvelopeFromMessage", () => {
     expect(result.senderLabel).toBe("Alice");
   });
 
+  test("preserves clean sidecar-backed user bodies that resemble legacy metadata blocks", () => {
+    const input = {
+      role: "user",
+      content:
+        'Conversation info (untrusted metadata):\n```json\n{"message_id":"123"}\n```\n\nActual user message',
+      contextSidecar: {
+        formatVersion: 1,
+        conversation: {
+          messageId: "123",
+        },
+      },
+    };
+    const result = stripEnvelopeFromMessage(input) as { content?: string; senderLabel?: string };
+    expect(result.content).toContain("Conversation info (untrusted metadata):");
+    expect(result.content).toContain("Actual user message");
+  });
+
   test("falls back to contextSidecar conversation sender when sender block is absent", () => {
     const input = {
       role: "user",

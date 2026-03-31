@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { ChannelPlugin } from "../channels/plugins/types.js";
+import { isCoreContextEngineId } from "../context-engine/ids.js";
 import { registerContextEngineForOwner } from "../context-engine/registry.js";
 import type { OperatorScope } from "../gateway/method-scopes.js";
 import type {
@@ -28,7 +29,7 @@ import { normalizeRegisteredProvider } from "./provider-validation.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import { withPluginRuntimePluginIdScope } from "./runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "./runtime/types.js";
-import { defaultSlotIdForKey, hasKind } from "./slots.js";
+import { hasKind } from "./slots.js";
 import {
   isPluginHookName,
   isPromptInjectionHookName,
@@ -1013,7 +1014,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 registerConversationBindingResolvedHandler(record, handler),
               registerCommand: (command) => registerCommand(record, command),
               registerContextEngine: (id, factory) => {
-                if (id === defaultSlotIdForKey("contextEngine")) {
+                if (isCoreContextEngineId(id)) {
                   pushDiagnostic({
                     level: "error",
                     pluginId: record.id,

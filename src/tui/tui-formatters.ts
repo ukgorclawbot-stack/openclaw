@@ -1,4 +1,4 @@
-import { stripLeadingInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
+import { stripVisibleUserText } from "../auto-reply/reply/strip-inbound-meta.js";
 import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.js";
 import { stripAnsi } from "../terminal/ansi.js";
 import { formatTokenCount } from "../utils/usage-format.js";
@@ -326,7 +326,7 @@ export function extractTextFromMessage(
   const text = extractTextBlocks(record.content, opts);
   if (text) {
     if (record.role === "user") {
-      return stripLeadingInboundMetadata(text);
+      return stripVisibleUserText(text, record, { leadingOnly: true });
     }
     return text;
   }

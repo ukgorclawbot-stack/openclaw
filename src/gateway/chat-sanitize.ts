@@ -2,6 +2,7 @@ import { normalizeContextSidecar } from "../auto-reply/reply/context-sidecar.js"
 import {
   extractInboundSenderLabel,
   stripInboundMetadata,
+  stripVisibleUserText,
 } from "../auto-reply/reply/strip-inbound-meta.js";
 import { stripEnvelope, stripMessageIdHints } from "../shared/chat-envelope.js";
 
@@ -44,6 +45,7 @@ function extractMessageSenderLabel(entry: Record<string, unknown>): string | nul
 function stripEnvelopeFromContentWithRole(
   content: unknown[],
   stripUserEnvelope: boolean,
+  message: Record<string, unknown>,
 ): { content: unknown[]; changed: boolean } {
   let changed = false;
   const next = content.map((item) => {
@@ -54,7 +56,9 @@ function stripEnvelopeFromContentWithRole(
     if (entry.type !== "text" || typeof entry.text !== "string") {
       return item;
     }
-    const inboundStripped = stripInboundMetadata(entry.text);
+    const inboundStripped = stripUserEnvelope
+      ? stripVisibleUserText(entry.text, message)
+      : stripInboundMetadata(entry.text);
     const stripped = stripUserEnvelope
       ? stripMessageIdHints(stripEnvelope(inboundStripped))
       : inboundStripped;
@@ -87,7 +91,9 @@ export function stripEnvelopeFromMessage(message: unknown): unknown {
   }
 
   if (typeof entry.content === "string") {
-    const inboundStripped = stripInboundMetadata(entry.content);
+    const inboundStripped = stripUserEnvelope
+      ? stripVisibleUserText(entry.content, entry)
+      : stripInboundMetadata(entry.content);
     const stripped = stripUserEnvelope
       ? stripMessageIdHints(stripEnvelope(inboundStripped))
       : inboundStripped;
@@ -96,13 +102,15 @@ export function stripEnvelopeFromMessage(message: unknown): unknown {
       changed = true;
     }
   } else if (Array.isArray(entry.content)) {
-    const updated = stripEnvelopeFromContentWithRole(entry.content, stripUserEnvelope);
+    const updated = stripEnvelopeFromContentWithRole(entry.content, stripUserEnvelope, entry);
     if (updated.changed) {
       next.content = updated.content;
       changed = true;
     }
   } else if (typeof entry.text === "string") {
-    const inboundStripped = stripInboundMetadata(entry.text);
+    const inboundStripped = stripUserEnvelope
+      ? stripVisibleUserText(entry.text, entry)
+      : stripInboundMetadata(entry.text);
     const stripped = stripUserEnvelope
       ? stripMessageIdHints(stripEnvelope(inboundStripped))
       : inboundStripped;

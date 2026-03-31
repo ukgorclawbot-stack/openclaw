@@ -226,9 +226,10 @@ engine slot.
 {
   plugins: {
     slots: {
-      // Select the active context engine. Default: "legacy".
+      // Select the active context engine. Default: "session-context-v2".
+      // "legacy" remains available as a compatibility alias.
       // Set to a plugin id to use a plugin engine.
-      contextEngine: "legacy",
+      contextEngine: "session-context-v2",
     },
   },
 }

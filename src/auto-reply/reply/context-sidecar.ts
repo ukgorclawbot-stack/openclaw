@@ -72,12 +72,39 @@ type ContextSidecarProjectionOptions = {
   keepThreadStarterBody?: boolean;
 };
 
-const TRIM_HISTORY_MAX_ENTRIES = 2;
-const TRIM_HISTORY_MAX_BODY_CHARS = 400;
-const TRIM_REPLY_MAX_BODY_CHARS = 600;
-const TRIM_FORWARDED_MAX_TITLE_CHARS = 120;
-const TRIM_FORWARDED_MAX_SIGNATURE_CHARS = 160;
-const TRIM_THREAD_STARTER_MAX_BODY_CHARS = 600;
+export type ContextSidecarProjectionBudgetPolicy = {
+  history: {
+    maxEntries: number;
+    maxBodyChars: number;
+  };
+  reply: {
+    maxBodyChars: number;
+  };
+  forwarded: {
+    maxTitleChars: number;
+    maxSignatureChars: number;
+  };
+  threadStarter: {
+    maxBodyChars: number;
+  };
+};
+
+export const DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY: ContextSidecarProjectionBudgetPolicy = {
+  history: {
+    maxEntries: 2,
+    maxBodyChars: 400,
+  },
+  reply: {
+    maxBodyChars: 600,
+  },
+  forwarded: {
+    maxTitleChars: 120,
+    maxSignatureChars: 160,
+  },
+  threadStarter: {
+    maxBodyChars: 600,
+  },
+};
 
 type UserTextPart = {
   type: "text" | "input_text" | "output_text";
@@ -116,10 +143,15 @@ function capProjectionHistory(
   if (!history?.length) {
     return undefined;
   }
-  const capped = history.slice(-TRIM_HISTORY_MAX_ENTRIES).map((entry) => ({
-    ...entry,
-    body: truncateProjectionText(entry.body, TRIM_HISTORY_MAX_BODY_CHARS),
-  }));
+  const capped = history
+    .slice(-DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY.history.maxEntries)
+    .map((entry) => ({
+      ...entry,
+      body: truncateProjectionText(
+        entry.body,
+        DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY.history.maxBodyChars,
+      ),
+    }));
   return capped.length > 0 ? capped : undefined;
 }
 
@@ -130,7 +162,10 @@ function capProjectionReply(reply: ContextSidecar["reply"]): ContextSidecar["rep
   return pruneUndefined({
     senderLabel: reply.senderLabel,
     isQuote: reply.isQuote,
-    body: truncateProjectionText(reply.body, TRIM_REPLY_MAX_BODY_CHARS),
+    body: truncateProjectionText(
+      reply.body,
+      DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY.reply.maxBodyChars,
+    ),
   });
 }
 
@@ -144,8 +179,14 @@ function capProjectionForwarded(
     from: forwarded.from,
     type: forwarded.type,
     username: forwarded.username,
-    title: truncateProjectionText(forwarded.title, TRIM_FORWARDED_MAX_TITLE_CHARS),
-    signature: truncateProjectionText(forwarded.signature, TRIM_FORWARDED_MAX_SIGNATURE_CHARS),
+    title: truncateProjectionText(
+      forwarded.title,
+      DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY.forwarded.maxTitleChars,
+    ),
+    signature: truncateProjectionText(
+      forwarded.signature,
+      DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY.forwarded.maxSignatureChars,
+    ),
     chatType: forwarded.chatType,
     dateMs: forwarded.dateMs,
   });
@@ -160,7 +201,10 @@ function capProjectionThread(
     return undefined;
   }
   return {
-    starterBody: truncateProjectionText(thread.starterBody, TRIM_THREAD_STARTER_MAX_BODY_CHARS),
+    starterBody: truncateProjectionText(
+      thread.starterBody,
+      DEFAULT_CONTEXT_SIDECAR_PROJECTION_POLICY.threadStarter.maxBodyChars,
+    ),
   };
 }
 

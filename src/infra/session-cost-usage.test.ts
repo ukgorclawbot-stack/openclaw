@@ -688,6 +688,41 @@ example
     expect(logs?.[0]?.content).toBe("hello there");
   });
 
+  it("preserves clean sidecar-backed user bodies in session usage logs", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-logs-sidecar-clean-"));
+    const sessionsDir = path.join(root, "agents", "main", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, "sess-sidecar-clean.jsonl");
+
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: "message",
+          timestamp: "2026-02-21T17:47:00.000Z",
+          message: {
+            role: "user",
+            content:
+              'Conversation info (untrusted metadata):\n```json\n{"message_id":"abc123"}\n```\n\nhello there',
+            contextSidecar: {
+              formatVersion: 1,
+              conversation: {
+                messageId: "abc123",
+              },
+            },
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const logs = await loadSessionLogs({ sessionFile });
+    expect(logs).toHaveLength(1);
+    expect(logs?.[0]?.role).toBe("user");
+    expect(logs?.[0]?.content).toContain("Conversation info (untrusted metadata):");
+    expect(logs?.[0]?.content).toContain("hello there");
+  });
+
   it("preserves totals and cumulative values when downsampling timeseries", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-timeseries-downsample-"));
     const sessionsDir = path.join(root, "agents", "main", "sessions");

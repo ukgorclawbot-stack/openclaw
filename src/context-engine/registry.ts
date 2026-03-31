@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../config/config.js";
 import { defaultSlotIdForKey } from "../plugins/slots.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+import { isCoreContextEngineId } from "./ids.js";
 import type { ContextEngine } from "./types.js";
 
 /**
@@ -351,10 +352,7 @@ export function registerContextEngineForOwner(
   const normalizedOwner = requireContextEngineOwner(owner);
   const registry = getContextEngineRegistryState().engines;
   const existing = registry.get(id);
-  if (
-    id === defaultSlotIdForKey("contextEngine") &&
-    normalizedOwner !== CORE_CONTEXT_ENGINE_OWNER
-  ) {
+  if (isCoreContextEngineId(id) && normalizedOwner !== CORE_CONTEXT_ENGINE_OWNER) {
     return { ok: false, existingOwner: CORE_CONTEXT_ENGINE_OWNER };
   }
   if (existing && existing.owner !== normalizedOwner) {
@@ -404,7 +402,7 @@ export function listContextEngineIds(): string[] {
  *
  * Resolution order:
  *   1. `config.plugins.slots.contextEngine` (explicit slot override)
- *   2. Default slot value ("legacy")
+ *   2. Default slot value ("session-context-v2")
  *
  * Throws if the resolved engine id has no registered factory.
  */

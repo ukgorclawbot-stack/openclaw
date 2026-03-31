@@ -3,7 +3,10 @@ import path from "node:path";
 import readline from "node:readline";
 import type { NormalizedUsage, UsageLike } from "../agents/usage.js";
 import { normalizeUsage } from "../agents/usage.js";
-import { stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
+import {
+  stripInboundMetadata,
+  stripVisibleUserText,
+} from "../auto-reply/reply/strip-inbound-meta.js";
 import type { OpenClawConfig } from "../config/config.js";
 import {
   isPrimarySessionTranscriptFileName,
@@ -1015,9 +1018,11 @@ export async function loadSessionLogs(params: {
       if (!content) {
         continue;
       }
-      content = stripInboundMetadata(content);
       if (role === "user") {
+        content = stripVisibleUserText(content, message);
         content = stripMessageIdHints(stripEnvelope(content)).trim();
+      } else {
+        content = stripInboundMetadata(content);
       }
       if (!content) {
         continue;
