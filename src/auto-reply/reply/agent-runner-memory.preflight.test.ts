@@ -74,4 +74,68 @@ describe("estimatePromptTokensFromSessionTranscript", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("applies oversized tool-result truncation before preflight compaction estimates", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-tool-result-"));
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const oversizedToolResult = `tool output ${"x".repeat(360_000)}`;
+
+    try {
+      await fs.writeFile(
+        sessionFile,
+        [
+          JSON.stringify({
+            id: "entry-1",
+            message: {
+              role: "user",
+              content: "older ask",
+              timestamp: 1,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-2",
+            message: {
+              role: "assistant",
+              content: "tool reply",
+              timestamp: 2,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-3",
+            message: {
+              role: "toolResult",
+              content: [{ type: "text", text: oversizedToolResult }],
+              timestamp: 3,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-4",
+            message: {
+              role: "user",
+              content: "latest ask",
+              timestamp: 4,
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const fullEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-tool-result-test",
+        sessionFile,
+      });
+      expect(fullEstimate).toBeGreaterThan(0);
+
+      const truncatedEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-tool-result-test",
+        sessionFile,
+        contextWindowTokens: 100_000,
+      });
+
+      expect(truncatedEstimate).toBeGreaterThan(0);
+      expect(truncatedEstimate).toBeLessThan(fullEstimate ?? Number.POSITIVE_INFINITY);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

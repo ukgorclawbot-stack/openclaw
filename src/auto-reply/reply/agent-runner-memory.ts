@@ -5,6 +5,7 @@ import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-bu
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import { truncateOversizedToolResultsInMessages } from "../../agents/pi-embedded-runner/tool-result-truncation.js";
 import { compactEmbeddedPiSession, runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
@@ -260,6 +261,7 @@ export function estimatePromptTokensFromSessionTranscript(params: {
   storePath?: string;
   sessionFile?: string;
   projectionTokenBudget?: number;
+  contextWindowTokens?: number;
 }): number | undefined {
   const sessionId = params.sessionId?.trim();
   if (!sessionId) {
@@ -274,9 +276,16 @@ export function estimatePromptTokensFromSessionTranscript(params: {
     if (messages.length === 0) {
       return undefined;
     }
-    const estimatedTokens = estimateMessagesTokens(
-      projectHistoricalMessagesWithContextSidecarBudget(messages, params.projectionTokenBudget),
+    const projectedMessages = projectHistoricalMessagesWithContextSidecarBudget(
+      messages,
+      params.projectionTokenBudget,
     );
+    const promptMessages =
+      typeof params.contextWindowTokens === "number" && Number.isFinite(params.contextWindowTokens)
+        ? truncateOversizedToolResultsInMessages(projectedMessages, params.contextWindowTokens)
+            .messages
+        : projectedMessages;
+    const estimatedTokens = estimateMessagesTokens(promptMessages);
     if (!Number.isFinite(estimatedTokens) || estimatedTokens <= 0) {
       return undefined;
     }
@@ -364,6 +373,7 @@ export async function runPreflightCompactionIfNeeded(params: {
           storePath: params.storePath,
           sessionFile: entry.sessionFile ?? params.followupRun.run.sessionFile,
           ...(projectionTokenBudget > 0 ? { projectionTokenBudget } : {}),
+          contextWindowTokens,
         });
   const projectedTokenCount =
     typeof transcriptPromptTokens === "number"
