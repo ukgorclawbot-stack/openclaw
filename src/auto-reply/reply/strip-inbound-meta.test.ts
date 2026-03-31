@@ -39,6 +39,11 @@ describe("stripInboundMetadata", () => {
     expect(stripInboundMetadata(text)).toBe(text);
   });
 
+  it("leaves clean sidecar-backed transcript bodies unchanged", () => {
+    const text = "clean user text\n\nwith quoted reply context kept in sidecar";
+    expect(stripInboundMetadata(text)).toBe(text);
+  });
+
   it("fast-path: returns empty string unchanged", () => {
     expect(stripInboundMetadata("")).toBe("");
   });

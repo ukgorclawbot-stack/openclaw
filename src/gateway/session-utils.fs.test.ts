@@ -501,6 +501,43 @@ describe("readSessionMessages", () => {
     expect(typeof marker.timestamp).toBe("number");
   });
 
+  test("preserves context sidecar payloads on transcript user messages", () => {
+    const sessionId = "test-session-context-sidecar";
+    const transcriptPath = path.join(tmpDir, `${sessionId}.jsonl`);
+    const lines = [
+      JSON.stringify({ type: "session", version: 1, id: sessionId }),
+      JSON.stringify({
+        id: "msg-user-1",
+        message: {
+          role: "user",
+          content: "clean user text",
+          contextSidecar: {
+            formatVersion: 1,
+            sender: { label: "Alice" },
+            reply: { body: "quoted body" },
+          },
+        },
+      }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join("\n"), "utf-8");
+
+    const out = readSessionMessages(sessionId, storePath);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      role: "user",
+      content: "clean user text",
+      contextSidecar: {
+        formatVersion: 1,
+        sender: { label: "Alice" },
+        reply: { body: "quoted body" },
+      },
+      __openclaw: {
+        id: "msg-user-1",
+        seq: 1,
+      },
+    });
+  });
+
   test.each([
     {
       sessionId: "cross-agent-default-root",
