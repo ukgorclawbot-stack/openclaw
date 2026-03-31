@@ -77,6 +77,7 @@ const TRIM_HISTORY_MAX_BODY_CHARS = 400;
 const TRIM_REPLY_MAX_BODY_CHARS = 600;
 const TRIM_FORWARDED_MAX_TITLE_CHARS = 120;
 const TRIM_FORWARDED_MAX_SIGNATURE_CHARS = 160;
+const TRIM_THREAD_STARTER_MAX_BODY_CHARS = 600;
 
 type UserTextPart = {
   type: "text" | "input_text" | "output_text";
@@ -148,6 +149,19 @@ function capProjectionForwarded(
     chatType: forwarded.chatType,
     dateMs: forwarded.dateMs,
   });
+}
+
+function capProjectionThread(
+  thread: ContextSidecar["thread"],
+  options: ContextSidecarProjectionOptions,
+): ContextSidecar["thread"] | undefined {
+  const keepThreadStarterBody = options.keepThreadStarterBody !== false;
+  if (!keepThreadStarterBody || !thread?.starterBody) {
+    return undefined;
+  }
+  return {
+    starterBody: truncateProjectionText(thread.starterBody, TRIM_THREAD_STARTER_MAX_BODY_CHARS),
+  };
 }
 
 function formatConversationTimestamp(
@@ -392,17 +406,11 @@ function projectContextSidecar(
   }
 
   if (level === "trim-history") {
-    const keepThreadStarterBody = options.keepThreadStarterBody !== false;
     return {
       ...sidecar,
       forwarded: capProjectionForwarded(sidecar.forwarded),
       history: capProjectionHistory(sidecar.history),
-      thread:
-        keepThreadStarterBody && sidecar.thread?.starterBody
-          ? {
-              starterBody: sidecar.thread.starterBody,
-            }
-          : undefined,
+      thread: capProjectionThread(sidecar.thread, options),
       conversation: sidecar.conversation
         ? {
             ...sidecar.conversation,

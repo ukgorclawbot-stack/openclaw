@@ -475,4 +475,103 @@ describe("estimatePromptTokensFromSessionTranscript", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("caps retained thread starter bodies before preflight compaction estimates", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-thread-cap-"));
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const repeatedThreadStarter = `starter ${"x".repeat(3_000)}`;
+
+    try {
+      await fs.writeFile(
+        sessionFile,
+        [
+          JSON.stringify({
+            id: "entry-1",
+            message: {
+              role: "user",
+              content: "older ask 1",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: 1,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-2",
+            message: {
+              role: "assistant",
+              content: "older answer 1",
+              timestamp: 2,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-3",
+            message: {
+              role: "user",
+              content: "older ask 2",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: 3,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-4",
+            message: {
+              role: "assistant",
+              content: "older answer 2",
+              timestamp: 4,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-5",
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: 5,
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const fullEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-thread-cap-test",
+        sessionFile,
+      });
+      expect(fullEstimate).toBeGreaterThan(0);
+
+      const cappedEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-thread-cap-test",
+        sessionFile,
+        projectionTokenBudget: Math.max(1, (fullEstimate ?? 1) - 300),
+      });
+
+      expect(cappedEstimate).toBeGreaterThan(0);
+      expect(cappedEstimate).toBeLessThan(fullEstimate ?? Number.POSITIVE_INFINITY);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

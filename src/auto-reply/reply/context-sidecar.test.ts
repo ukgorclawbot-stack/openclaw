@@ -454,4 +454,76 @@ describe("buildInboundContextSidecar", () => {
     expect(olderProjectedText).not.toContain("x".repeat(1_200));
     expect(messageText(projected[2])).toContain("x".repeat(1_200));
   });
+
+  it("caps thread starter bodies on the retained older sidecar turn during projection", () => {
+    const repeatedThreadStarter = `starter ${"x".repeat(3_000)}`;
+    const messages = [
+      {
+        role: "user",
+        content: "older ask 1",
+        contextSidecar: {
+          formatVersion: 1,
+          thread: {
+            starterBody: repeatedThreadStarter,
+          },
+          conversation: {
+            hasThreadStarter: true,
+          },
+        },
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: "older answer 1",
+        timestamp: 2,
+      },
+      {
+        role: "user",
+        content: "older ask 2",
+        contextSidecar: {
+          formatVersion: 1,
+          thread: {
+            starterBody: repeatedThreadStarter,
+          },
+          conversation: {
+            hasThreadStarter: true,
+          },
+        },
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: "older answer 2",
+        timestamp: 4,
+      },
+      {
+        role: "user",
+        content: "latest ask",
+        contextSidecar: {
+          formatVersion: 1,
+          thread: {
+            starterBody: repeatedThreadStarter,
+          },
+          conversation: {
+            hasThreadStarter: true,
+          },
+        },
+        timestamp: 5,
+      },
+    ];
+
+    const fullProjection = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+    );
+    const projected = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+      estimateMessagesTokens(fullProjection) - 300,
+    );
+
+    expect(messageText(projected[0])).not.toContain("Thread starter (untrusted, for context)");
+    expect(messageText(projected[2])).toContain("Thread starter (untrusted, for context)");
+    expect(messageText(projected[2]).length).toBeLessThan(messageText(fullProjection[2]).length);
+    expect(messageText(projected[2])).not.toContain("x".repeat(1_200));
+    expect(messageText(projected[4])).toContain("x".repeat(1_200));
+  });
 });
