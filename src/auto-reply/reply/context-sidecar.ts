@@ -583,3 +583,25 @@ export function projectHistoricalMessagesWithContextSidecarBudget(
 
   return next;
 }
+
+export function projectCompactionMessagesWithContextSidecarBudget(
+  messages: AgentMessage[],
+  tokenBudget?: number,
+): AgentMessage[] {
+  const projected = projectHistoricalMessagesWithContextSidecarBudget(messages, tokenBudget);
+  const latestSidecarUserIndex = messages.findLastIndex(
+    (message) =>
+      message.role === "user" &&
+      normalizeContextSidecar((message as Record<string, unknown>)["contextSidecar"]) !== undefined,
+  );
+  if (
+    latestSidecarUserIndex < 0 ||
+    projected[latestSidecarUserIndex] === messages[latestSidecarUserIndex]
+  ) {
+    return projected;
+  }
+
+  const next = projected.slice();
+  next[latestSidecarUserIndex] = messages[latestSidecarUserIndex];
+  return next;
+}

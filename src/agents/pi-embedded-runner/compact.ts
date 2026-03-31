@@ -8,7 +8,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { resolveHeartbeatPrompt } from "../../auto-reply/heartbeat.js";
-import { projectHistoricalMessagesWithContextSidecarBudget } from "../../auto-reply/reply/context-sidecar.js";
+import { projectCompactionMessagesWithContextSidecarBudget } from "../../auto-reply/reply/context-sidecar.js";
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveChannelCapabilities } from "../../config/channel-capabilities.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -762,7 +762,7 @@ export async function compactEmbeddedPiSessionDirect(
           : truncated;
         const compactionInputMessages =
           limited.length > 0
-            ? projectHistoricalMessagesWithContextSidecarBudget(limited, params.tokenBudget)
+            ? projectCompactionMessagesWithContextSidecarBudget(limited, params.tokenBudget)
             : limited;
         if (compactionInputMessages.length > 0) {
           session.agent.replaceMessages(compactionInputMessages);
