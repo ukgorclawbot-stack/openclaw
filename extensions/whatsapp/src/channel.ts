@@ -21,6 +21,7 @@ import {
   resolveWhatsAppGroupToolPolicy,
 } from "./group-policy.js";
 import { looksLikeWhatsAppTargetId, normalizeWhatsAppMessagingTarget } from "./normalize.js";
+import { resolveWhatsAppReactionLevel } from "./reaction-level.js";
 import {
   createActionGate,
   createWhatsAppOutboundBase,
@@ -33,6 +34,7 @@ import {
   resolveWhatsAppMentionStripRegexes,
   type ChannelMessageActionName,
   type ChannelPlugin,
+  type OpenClawConfig,
   isWhatsAppGroupJid,
   normalizeWhatsAppTarget,
 } from "./runtime-api.js";
@@ -61,6 +63,20 @@ function parseWhatsAppExplicitTarget(raw: string) {
     to: normalized,
     chatType: isWhatsAppGroupJid(normalized) ? ("group" as const) : ("direct" as const),
   };
+}
+
+function areWhatsAppAgentReactionsEnabled(params: { cfg: OpenClawConfig; accountId?: string }) {
+  if (!params.cfg.channels?.whatsapp) {
+    return false;
+  }
+  const gate = createActionGate(params.cfg.channels.whatsapp.actions);
+  if (!gate("reactions")) {
+    return false;
+  }
+  return resolveWhatsAppReactionLevel({
+    cfg: params.cfg,
+    accountId: params.accountId,
+  }).agentReactionsEnabled;
 }
 
 export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
@@ -111,6 +127,23 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
         enforceOwnerForCommands: true,
         skipWhenConfigEmpty: true,
       },
+      agentPrompt: {
+        reactionGuidance: ({ cfg, accountId }) => {
+          if (
+            !areWhatsAppAgentReactionsEnabled({
+              cfg,
+              accountId: accountId ?? undefined,
+            })
+          ) {
+            return undefined;
+          }
+          const level = resolveWhatsAppReactionLevel({
+            cfg,
+            accountId: accountId ?? undefined,
+          }).agentReactionGuidance;
+          return level ? { level, channelLabel: "WhatsApp" } : undefined;
+        },
+      },
       messaging: {
         normalizeTarget: normalizeWhatsAppMessagingTarget,
         resolveOutboundSessionRoute: (params) => resolveWhatsAppOutboundSessionRoute(params),
@@ -140,13 +173,18 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
         listGroups: async (params) => listWhatsAppDirectoryGroupsFromConfig(params),
       },
       actions: {
-        describeMessageTool: ({ cfg }) => {
+        describeMessageTool: ({ cfg, accountId }) => {
           if (!cfg.channels?.whatsapp) {
             return null;
           }
           const gate = createActionGate(cfg.channels.whatsapp.actions);
           const actions = new Set<ChannelMessageActionName>();
-          if (gate("reactions")) {
+          if (
+            areWhatsAppAgentReactionsEnabled({
+              cfg,
+              accountId: accountId ?? undefined,
+            })
+          ) {
             actions.add("react");
           }
           if (gate("polls")) {
