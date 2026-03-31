@@ -338,4 +338,60 @@ describe("buildInboundContextSidecar", () => {
     expect(trimmedOlderText).toContain("older context 3");
     expect(trimmedOlderText.length).toBeLessThan(messageText(fullProjection[0]).length);
   });
+
+  it("caps quoted reply bodies on older sidecar turns during projection", () => {
+    const repeatedReplyBody = `quoted ${"x".repeat(3_000)}`;
+    const messages = [
+      {
+        role: "user",
+        content: "older ask",
+        contextSidecar: {
+          formatVersion: 1,
+          reply: {
+            senderLabel: "Alice",
+            body: repeatedReplyBody,
+          },
+          conversation: {
+            hasReplyContext: true,
+          },
+        },
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: "older answer",
+        timestamp: 2,
+      },
+      {
+        role: "user",
+        content: "latest ask",
+        contextSidecar: {
+          formatVersion: 1,
+          reply: {
+            senderLabel: "Alice",
+            body: repeatedReplyBody,
+          },
+          conversation: {
+            hasReplyContext: true,
+          },
+        },
+        timestamp: 3,
+      },
+    ];
+
+    const fullProjection = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+    );
+    const projected = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+      estimateMessagesTokens(fullProjection) - 300,
+    );
+
+    const olderProjectedText = messageText(projected[0]);
+    expect(olderProjectedText).toContain("Replied message (untrusted, for context)");
+    expect(olderProjectedText).toContain("quoted");
+    expect(olderProjectedText.length).toBeLessThan(messageText(fullProjection[0]).length);
+    expect(olderProjectedText).not.toContain("x".repeat(1_200));
+    expect(messageText(projected[2])).toContain("x".repeat(1_200));
+  });
 });

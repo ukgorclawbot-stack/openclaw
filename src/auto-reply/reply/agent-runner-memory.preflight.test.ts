@@ -313,4 +313,80 @@ describe("estimatePromptTokensFromSessionTranscript", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("caps quoted reply bodies before preflight compaction estimates", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-reply-cap-"));
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const repeatedReplyBody = `quoted ${"x".repeat(3_000)}`;
+
+    try {
+      await fs.writeFile(
+        sessionFile,
+        [
+          JSON.stringify({
+            id: "entry-1",
+            message: {
+              role: "user",
+              content: "older ask",
+              contextSidecar: {
+                formatVersion: 1,
+                reply: {
+                  senderLabel: "Alice",
+                  body: repeatedReplyBody,
+                },
+                conversation: {
+                  hasReplyContext: true,
+                },
+              },
+              timestamp: 1,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-2",
+            message: {
+              role: "assistant",
+              content: "older answer",
+              timestamp: 2,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-3",
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                reply: {
+                  senderLabel: "Alice",
+                  body: repeatedReplyBody,
+                },
+                conversation: {
+                  hasReplyContext: true,
+                },
+              },
+              timestamp: 3,
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const fullEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-reply-cap-test",
+        sessionFile,
+      });
+      expect(fullEstimate).toBeGreaterThan(0);
+
+      const cappedEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-reply-cap-test",
+        sessionFile,
+        projectionTokenBudget: Math.max(1, (fullEstimate ?? 1) - 300),
+      });
+
+      expect(cappedEstimate).toBeGreaterThan(0);
+      expect(cappedEstimate).toBeLessThan(fullEstimate ?? Number.POSITIVE_INFINITY);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

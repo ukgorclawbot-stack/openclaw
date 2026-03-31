@@ -74,6 +74,7 @@ type ContextSidecarProjectionOptions = {
 
 const TRIM_HISTORY_MAX_ENTRIES = 2;
 const TRIM_HISTORY_MAX_BODY_CHARS = 400;
+const TRIM_REPLY_MAX_BODY_CHARS = 600;
 
 type UserTextPart = {
   type: "text" | "input_text" | "output_text";
@@ -117,6 +118,17 @@ function capProjectionHistory(
     body: truncateProjectionText(entry.body, TRIM_HISTORY_MAX_BODY_CHARS),
   }));
   return capped.length > 0 ? capped : undefined;
+}
+
+function capProjectionReply(reply: ContextSidecar["reply"]): ContextSidecar["reply"] | undefined {
+  if (!reply?.body) {
+    return reply;
+  }
+  return pruneUndefined({
+    senderLabel: reply.senderLabel,
+    isQuote: reply.isQuote,
+    body: truncateProjectionText(reply.body, TRIM_REPLY_MAX_BODY_CHARS),
+  });
 }
 
 function formatConversationTimestamp(
@@ -381,6 +393,7 @@ function projectContextSidecar(
             historyCount: sidecar.conversation.historyCount ?? sidecar.history?.length,
           }
         : undefined,
+      reply: capProjectionReply(sidecar.reply),
     };
   }
 
@@ -406,13 +419,7 @@ function projectContextSidecar(
           name: sidecar.sender.name,
         })
       : undefined,
-    reply: sidecar.reply?.body
-      ? pruneUndefined({
-          senderLabel: sidecar.reply.senderLabel,
-          isQuote: sidecar.reply.isQuote,
-          body: sidecar.reply.body,
-        })
-      : undefined,
+    reply: capProjectionReply(sidecar.reply),
   };
 }
 
