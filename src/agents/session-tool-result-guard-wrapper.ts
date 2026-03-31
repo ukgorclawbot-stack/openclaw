@@ -1,4 +1,8 @@
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
+import {
+  applyPersistedUserMessageOverride,
+  type PersistedUserMessageOverride,
+} from "../auto-reply/reply/context-sidecar.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import {
   applyInputProvenanceToUserMessage,
@@ -23,6 +27,7 @@ export function guardSessionManager(
     agentId?: string;
     sessionKey?: string;
     inputProvenance?: InputProvenance;
+    persistedUserMessage?: PersistedUserMessageOverride;
     allowSyntheticToolResults?: boolean;
     allowedToolNames?: Iterable<string>;
   },
@@ -65,7 +70,10 @@ export function guardSessionManager(
   const guard = installSessionToolResultGuard(sessionManager, {
     sessionKey: opts?.sessionKey,
     transformMessageForPersistence: (message) =>
-      applyInputProvenanceToUserMessage(message, opts?.inputProvenance),
+      applyPersistedUserMessageOverride(
+        applyInputProvenanceToUserMessage(message, opts?.inputProvenance),
+        opts?.persistedUserMessage,
+      ),
     transformToolResultForPersistence: transform,
     allowSyntheticToolResults: opts?.allowSyntheticToolResults,
     allowedToolNames: opts?.allowedToolNames,

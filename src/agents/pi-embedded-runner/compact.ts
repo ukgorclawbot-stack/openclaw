@@ -8,6 +8,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { resolveHeartbeatPrompt } from "../../auto-reply/heartbeat.js";
+import { projectHistoricalMessagesWithContextSidecarBudget } from "../../auto-reply/reply/context-sidecar.js";
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveChannelCapabilities } from "../../config/channel-capabilities.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -759,8 +760,12 @@ export async function compactEmbeddedPiSessionDirect(
               erroredAssistantResultPolicy: "drop",
             })
           : truncated;
-        if (limited.length > 0) {
-          session.agent.replaceMessages(limited);
+        const compactionInputMessages =
+          limited.length > 0
+            ? projectHistoricalMessagesWithContextSidecarBudget(limited, params.tokenBudget)
+            : limited;
+        if (compactionInputMessages.length > 0) {
+          session.agent.replaceMessages(compactionInputMessages);
         }
         const hookRunner = asCompactionHookRunner(getGlobalHookRunner());
         const observedTokenCount = normalizeObservedTokenCount(params.currentTokenCount);
@@ -816,7 +821,10 @@ export async function compactEmbeddedPiSessionDirect(
         // history subset, not the full session.
         let fullSessionTokensBefore = 0;
         try {
-          fullSessionTokensBefore = limited.reduce((sum, msg) => sum + estimateTokens(msg), 0);
+          fullSessionTokensBefore = compactionInputMessages.reduce(
+            (sum, msg) => sum + estimateTokens(msg),
+            0,
+          );
         } catch {
           // If token estimation throws on a malformed message, fall back to 0 so
           // the sanity check below becomes a no-op instead of crashing compaction.

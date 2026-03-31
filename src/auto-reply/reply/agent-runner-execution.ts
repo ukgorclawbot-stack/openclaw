@@ -410,6 +410,7 @@ export async function runAgentTurnWithFallback(params: {
                 ...senderContext,
                 ...runBaseParams,
                 prompt: params.commandBody,
+                persistedUserMessage: params.followupRun.run.persistedUserMessage,
                 extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
                 toolResultFormat: (() => {
                   const channel = resolveMessageChannel(

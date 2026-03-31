@@ -200,6 +200,7 @@ async function loadFreshFollowupRunnerModuleForTest() {
     acquireSessionWriteLock: vi.fn(async () => ({
       release: async () => {},
     })),
+    resolveSessionLockMaxHoldFromTimeout: vi.fn(() => 0),
   }));
   vi.doMock("../../agents/pi-embedded.js", () => ({
     abortEmbeddedPiRun: vi.fn(async () => false),
@@ -619,6 +620,107 @@ describe("createFollowupRunner compaction", () => {
 
     const store = loadSessionStore(storePath, { skipCache: true });
     expect(store.main?.compactionCount).toBe(2);
+  });
+
+  it("skips preflight compaction when sidecar projection trims older history below the threshold", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(tmpdir(), "openclaw-preflight-followup-skip-"));
+    const storePath = path.join(workspaceDir, "sessions.json");
+    const transcriptPath = path.join(workspaceDir, "session.jsonl");
+    const repeatedHistory = Array.from({ length: 4 }, (_, index) => ({
+      sender: "Bob",
+      timestampMs: index + 1,
+      body: `older context ${index} ${"x".repeat(120_000)}`,
+    }));
+    await fs.writeFile(
+      transcriptPath,
+      [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: "older ask",
+            contextSidecar: {
+              formatVersion: 1,
+              history: repeatedHistory,
+              conversation: { historyCount: repeatedHistory.length },
+            },
+            timestamp: Date.now(),
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: "older answer",
+            timestamp: Date.now() + 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: "latest ask",
+            contextSidecar: {
+              formatVersion: 1,
+              history: [{ sender: "Bob", timestampMs: 9, body: "small context" }],
+              conversation: { historyCount: 1 },
+            },
+            timestamp: Date.now() + 2,
+          },
+        }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      sessionFile: transcriptPath,
+      totalTokens: 10,
+      totalTokensFresh: false,
+      compactionCount: 1,
+    };
+    const sessionStore: Record<string, SessionEntry> = {
+      main: sessionEntry,
+    };
+    await saveSessionStore(storePath, sessionStore);
+
+    const embeddedCalls: Array<{ extraSystemPrompt?: string }> = [];
+    runEmbeddedPiAgentMock.mockImplementationOnce(
+      async (params: { extraSystemPrompt?: string }) => {
+        embeddedCalls.push({ extraSystemPrompt: params.extraSystemPrompt });
+        return {
+          payloads: [{ text: "final" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      },
+    );
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: vi.fn(async () => {}) },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionEntry,
+      sessionStore,
+      sessionKey: "main",
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+      agentCfgContextTokens: 100_000,
+    });
+
+    const queued = createQueuedRun({
+      run: {
+        sessionFile: transcriptPath,
+        workspaceDir,
+      },
+    });
+
+    await runner(queued);
+
+    expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+    expect(embeddedCalls[0]?.extraSystemPrompt ?? "").not.toContain(
+      "Post-compaction context refresh",
+    );
+
+    const store = loadSessionStore(storePath, { skipCache: true });
+    expect(store.main?.compactionCount).toBe(1);
   });
 });
 

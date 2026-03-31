@@ -6,6 +6,7 @@ import {
   contextEngineCompactMock,
   ensureRuntimePluginsLoaded,
   estimateTokensMock,
+  limitHistoryTurnsMock,
   getMemorySearchManagerMock,
   hookRunner,
   loadCompactHooksHarness,
@@ -46,6 +47,23 @@ type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
 };
+
+function messageText(message: AgentMessage | undefined): string {
+  const content = (message as { content?: unknown } | undefined)?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) =>
+      part && typeof part === "object" && "text" in part && typeof part.text === "string"
+        ? part.text
+        : "",
+    )
+    .join("\n");
+}
 
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
@@ -253,6 +271,81 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       },
       expect.objectContaining({ sessionKey: "agent:main:session-1", messageProvider: "telegram" }),
     );
+  });
+
+  it("projects older sidecar-backed turns before compaction runs", async () => {
+    limitHistoryTurnsMock.mockImplementation((msgs: unknown[]) => msgs);
+    estimateTokensMock.mockImplementation((message: unknown) => {
+      const content = (message as { content?: unknown }).content;
+      if (typeof content === "string") {
+        return content.length;
+      }
+      if (!Array.isArray(content)) {
+        return 0;
+      }
+      return content.reduce((sum, part) => {
+        if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+          return sum + part.text.length;
+        }
+        return sum;
+      }, 0);
+    });
+    const repeatedHistory = Array.from({ length: 4 }, (_, index) => ({
+      sender: "Bob",
+      timestampMs: index + 1,
+      body: `older context ${index} ${"x".repeat(800)}`,
+    }));
+    sessionMessages.splice(
+      0,
+      sessionMessages.length,
+      {
+        role: "user",
+        content: "older ask",
+        contextSidecar: {
+          formatVersion: 1,
+          history: repeatedHistory,
+          conversation: { historyCount: repeatedHistory.length },
+        },
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: "older answer",
+        timestamp: 2,
+      },
+      {
+        role: "user",
+        content: "latest ask",
+        contextSidecar: {
+          formatVersion: 1,
+          history: repeatedHistory,
+          conversation: { historyCount: repeatedHistory.length },
+        },
+        timestamp: 3,
+      },
+    );
+    let compactInput: AgentMessage[] | undefined;
+    sessionCompactImpl.mockImplementation(async (messages?: unknown) => {
+      compactInput = messages as AgentMessage[] | undefined;
+      return {
+        summary: "summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 120,
+        details: { ok: true },
+      };
+    });
+
+    await compactEmbeddedPiSessionDirect({
+      sessionId: TEST_SESSION_ID,
+      sessionKey: TEST_SESSION_KEY,
+      sessionFile: TEST_SESSION_FILE,
+      workspaceDir: TEST_WORKSPACE_DIR,
+      tokenBudget: 2500,
+    });
+
+    expect(compactInput).toBeDefined();
+    expect(messageText(compactInput?.[0])).not.toContain("Chat history since last reply");
+    expect(messageText(compactInput?.[2])).toContain("Chat history since last reply");
   });
 
   it("uses sessionId as hook session key fallback when sessionKey is missing", async () => {

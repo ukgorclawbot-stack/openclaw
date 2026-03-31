@@ -1,4 +1,6 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import { estimateMessagesTokens } from "../agents/compaction.js";
+import { projectHistoricalMessagesWithContextSidecarBudget } from "../auto-reply/reply/context-sidecar.js";
 import { delegateCompactionToRuntime } from "./delegate.js";
 import { registerContextEngineForOwner } from "./registry.js";
 import type {
@@ -42,12 +44,14 @@ export class LegacyContextEngine implements ContextEngine {
     tokenBudget?: number;
     model?: string;
   }): Promise<AssembleResult> {
-    // Pass-through: the existing sanitize -> validate -> limit -> repair pipeline
-    // in attempt.ts handles context assembly for the legacy engine.
-    // We just return the messages as-is with a rough token estimate.
+    const messages = projectHistoricalMessagesWithContextSidecarBudget(
+      params.messages,
+      params.tokenBudget,
+    );
+
     return {
-      messages: params.messages,
-      estimatedTokens: 0, // Caller handles estimation
+      messages,
+      estimatedTokens: params.tokenBudget ? estimateMessagesTokens(messages) : 0,
     };
   }
 
