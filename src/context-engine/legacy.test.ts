@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import { estimateMessagesTokens } from "../agents/compaction.js";
+import { serializeLegacyInboundContextPrefix } from "../auto-reply/reply/context-sidecar.js";
 import { LegacyContextEngine } from "./legacy.js";
 
 function messageText(message: AgentMessage | undefined): string {
@@ -41,12 +42,18 @@ describe("LegacyContextEngine", () => {
       ],
     });
 
+    expect(result.systemPromptAddition).toBe(
+      serializeLegacyInboundContextPrefix({
+        formatVersion: 1,
+        reply: {
+          senderLabel: "Bob",
+          body: "quoted body",
+        },
+      }),
+    );
     expect(result.messages[0]).toMatchObject({
       role: "user",
-      content: expect.stringContaining("Replied message (untrusted, for context):"),
-    });
-    expect(result.messages[0]).toMatchObject({
-      content: expect.stringContaining("tell me about cats"),
+      content: "tell me about cats",
     });
   });
 
@@ -69,19 +76,17 @@ describe("LegacyContextEngine", () => {
       ],
     });
 
+    expect(result.systemPromptAddition).toBe(
+      serializeLegacyInboundContextPrefix({
+        formatVersion: 1,
+        conversation: {
+          hasReplyContext: true,
+        },
+      }),
+    );
     expect(result.messages[0]).toMatchObject({
       role: "user",
-      content: [
-        {
-          type: "text",
-          text: expect.stringContaining("Conversation info (untrusted metadata):"),
-        },
-        {
-          type: "image",
-          data: "abc",
-          mimeType: "image/png",
-        },
-      ],
+      content: [{ type: "image", data: "abc", mimeType: "image/png" }],
     });
   });
 
@@ -103,7 +108,7 @@ describe("LegacyContextEngine", () => {
     expect(result.messages[0]).toBe(message);
   });
 
-  it("drops history blocks from older sidecar-backed turns before touching the latest turn", async () => {
+  it("keeps older sidecar-backed turns inline while moving the latest turn into systemPromptAddition", async () => {
     const engine = new LegacyContextEngine();
     const repeatedHistory = Array.from({ length: 4 }, (_, index) => ({
       sender: "Bob",
@@ -138,18 +143,81 @@ describe("LegacyContextEngine", () => {
       } as AgentMessage,
     ];
 
-    const full = await engine.assemble({
-      sessionId: "session-4",
-      messages,
-    });
     const result = await engine.assemble({
       sessionId: "session-4",
       messages,
-      tokenBudget: estimateMessagesTokens(full.messages) - 200,
     });
 
-    expect(messageText(result.messages[0])).not.toContain("Chat history since last reply");
-    expect(messageText(result.messages[2])).toContain("Chat history since last reply");
+    expect(messageText(result.messages[0])).toContain(
+      "Chat history since last reply (untrusted, for context):",
+    );
+    expect(messageText(result.messages[2])).toBe("latest ask");
+    expect(result.systemPromptAddition).toContain(
+      "Chat history since last reply (untrusted, for context):",
+    );
+  });
+
+  it("moves the latest sidecar prefix into systemPromptAddition and keeps the latest user body clean", async () => {
+    const engine = new LegacyContextEngine();
+    const olderSidecar = {
+      formatVersion: 1,
+      reply: {
+        senderLabel: "Bob",
+        body: "older quoted body",
+      },
+    } as const;
+    const latestSidecar = {
+      formatVersion: 1,
+      reply: {
+        senderLabel: "Alice",
+        body: "latest quoted body",
+      },
+      history: [
+        {
+          sender: "Alice",
+          timestampMs: 2,
+          body: "latest history",
+        },
+      ],
+    } as const;
+    const latestContent = [
+      { type: "text", text: "latest ask" },
+      { type: "image", data: "abc", mimeType: "image/png" },
+    ] as const;
+    const messages = [
+      {
+        role: "user",
+        content: "older ask",
+        contextSidecar: olderSidecar,
+        timestamp: 1,
+      } as AgentMessage,
+      {
+        role: "assistant",
+        content: "older answer",
+        timestamp: 2,
+      } as AgentMessage,
+      {
+        role: "user",
+        content: latestContent,
+        contextSidecar: latestSidecar,
+        timestamp: 3,
+      } as AgentMessage,
+    ];
+
+    const result = await engine.assemble({
+      sessionId: "session-6",
+      messages,
+    });
+
+    expect(result.systemPromptAddition).toBe(
+      serializeLegacyInboundContextPrefix(latestSidecar),
+    );
+    expect(messageText(result.messages[0])).toContain("Replied message (untrusted, for context):");
+    expect(result.messages[2]).toMatchObject({
+      role: "user",
+      content: latestContent,
+    });
+    expect(messageText(result.messages[2]).trim()).toBe("latest ask");
   });
 
   it("falls back to clean content for oldest sidecar-backed turns under extremely low budget", async () => {
@@ -184,13 +252,24 @@ describe("LegacyContextEngine", () => {
       } as AgentMessage,
     ];
 
+    const full = await engine.assemble({
+      sessionId: "session-5",
+      messages,
+    });
+    const fullTokenCount =
+      estimateMessagesTokens(full.messages) +
+      estimateMessagesTokens([
+        { role: "system", content: full.systemPromptAddition ?? "" } as AgentMessage,
+      ]);
+
     const result = await engine.assemble({
       sessionId: "session-5",
       messages,
-      tokenBudget: 1,
+      tokenBudget: Math.max(1, fullTokenCount - 200),
     });
 
     expect(messageText(result.messages[0])).toBe("older ask");
-    expect(messageText(result.messages[2])).toContain("Replied message (untrusted, for context):");
+    expect(messageText(result.messages[2])).toBe("latest ask");
+    expect(result.systemPromptAddition).toContain("Replied message (untrusted, for context):");
   });
 });
