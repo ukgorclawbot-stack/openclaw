@@ -68,6 +68,10 @@ export type PersistedUserMessageOverride = {
 
 export type ContextSidecarProjectionLevel = "full" | "trim-history" | "trim-context";
 
+type ContextSidecarProjectionOptions = {
+  keepThreadStarterBody?: boolean;
+};
+
 type UserTextPart = {
   type: "text" | "input_text" | "output_text";
   text: string;
@@ -324,21 +328,24 @@ export function normalizeContextSidecar(value: unknown): ContextSidecar | undefi
 function projectContextSidecar(
   sidecar: ContextSidecar,
   level: ContextSidecarProjectionLevel,
+  options: ContextSidecarProjectionOptions = {},
 ): ContextSidecar {
   if (level === "full") {
     return sidecar;
   }
 
   if (level === "trim-history") {
+    const keepThreadStarterBody = options.keepThreadStarterBody !== false;
     return {
       ...sidecar,
       forwarded: undefined,
       history: undefined,
-      thread: sidecar.thread?.starterBody
-        ? {
-            starterBody: sidecar.thread.starterBody,
-          }
-        : undefined,
+      thread:
+        keepThreadStarterBody && sidecar.thread?.starterBody
+          ? {
+              starterBody: sidecar.thread.starterBody,
+            }
+          : undefined,
       conversation: sidecar.conversation
         ? {
             ...sidecar.conversation,
@@ -484,6 +491,7 @@ export function projectHistoricalUserMessageWithContextSidecar(
 export function projectHistoricalUserMessageWithContextSidecarLevel(
   message: AgentMessage,
   level: ContextSidecarProjectionLevel,
+  options: ContextSidecarProjectionOptions = {},
 ): AgentMessage {
   if (level === "full") {
     return projectHistoricalUserMessageWithContextSidecar(message);
@@ -495,7 +503,9 @@ export function projectHistoricalUserMessageWithContextSidecarLevel(
     return message;
   }
 
-  const legacyPrefix = serializeLegacyInboundContextPrefix(projectContextSidecar(sidecar, level));
+  const legacyPrefix = serializeLegacyInboundContextPrefix(
+    projectContextSidecar(sidecar, level, options),
+  );
   if (!legacyPrefix) {
     return message;
   }
@@ -540,15 +550,16 @@ export function projectHistoricalMessagesWithContextSidecarBudget(
   if (olderIndexes.length === 0) {
     return next;
   }
+  const latestOlderIndex = olderIndexes.at(-1);
 
   const applyAtIndexes = (
     indexes: number[],
-    project: (message: AgentMessage) => AgentMessage,
+    project: (message: AgentMessage, index: number) => AgentMessage,
   ): boolean => {
     let changed = false;
     const candidateMessages = next.slice();
     for (const index of indexes) {
-      const candidate = project(messages[index]);
+      const candidate = project(messages[index], index);
       if (candidate !== candidateMessages[index]) {
         candidateMessages[index] = candidate;
         changed = true;
@@ -562,8 +573,10 @@ export function projectHistoricalMessagesWithContextSidecarBudget(
 
   const projectionSteps = [
     () =>
-      applyAtIndexes(olderIndexes, (message) =>
-        projectHistoricalUserMessageWithContextSidecarLevel(message, "trim-history"),
+      applyAtIndexes(olderIndexes, (message, index) =>
+        projectHistoricalUserMessageWithContextSidecarLevel(message, "trim-history", {
+          keepThreadStarterBody: index === latestOlderIndex,
+        }),
       ),
     () =>
       applyAtIndexes(olderIndexes, (message) =>

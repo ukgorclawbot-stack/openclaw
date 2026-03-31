@@ -218,4 +218,73 @@ describe("buildInboundContextSidecar", () => {
     expect(messageText(projected[0])).not.toContain("Chat history since last reply");
     expect(messageText(projected[2])).toContain("Chat history since last reply");
   });
+
+  it("keeps duplicated thread starter context on only the most recent older sidecar turn", () => {
+    const repeatedThreadStarter = `starter ${"x".repeat(4_000)}`;
+    const messages = [
+      {
+        role: "user",
+        content: "older ask 1",
+        contextSidecar: {
+          formatVersion: 1,
+          thread: {
+            starterBody: repeatedThreadStarter,
+          },
+          conversation: {
+            hasThreadStarter: true,
+          },
+        },
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: "older answer 1",
+        timestamp: 2,
+      },
+      {
+        role: "user",
+        content: "older ask 2",
+        contextSidecar: {
+          formatVersion: 1,
+          thread: {
+            starterBody: repeatedThreadStarter,
+          },
+          conversation: {
+            hasThreadStarter: true,
+          },
+        },
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: "older answer 2",
+        timestamp: 4,
+      },
+      {
+        role: "user",
+        content: "latest ask",
+        contextSidecar: {
+          formatVersion: 1,
+          thread: {
+            starterBody: repeatedThreadStarter,
+          },
+          conversation: {
+            hasThreadStarter: true,
+          },
+        },
+        timestamp: 5,
+      },
+    ];
+
+    const fullProjection = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+    );
+    const projected = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+      estimateMessagesTokens(fullProjection) - 200,
+    );
+
+    expect(messageText(projected[0])).not.toContain("Thread starter (untrusted, for context)");
+    expect(messageText(projected[2])).toContain("Thread starter (untrusted, for context)");
+  });
 });

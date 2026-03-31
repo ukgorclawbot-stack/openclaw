@@ -138,4 +138,103 @@ describe("estimatePromptTokensFromSessionTranscript", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("deduplicates repeated thread starter context before preflight compaction estimates", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-thread-starter-"));
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const repeatedThreadStarter = `starter ${"x".repeat(4_000)}`;
+
+    try {
+      await fs.writeFile(
+        sessionFile,
+        [
+          JSON.stringify({
+            id: "entry-1",
+            message: {
+              role: "user",
+              content: "older ask 1",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: 1,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-2",
+            message: {
+              role: "assistant",
+              content: "older answer 1",
+              timestamp: 2,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-3",
+            message: {
+              role: "user",
+              content: "older ask 2",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: 3,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-4",
+            message: {
+              role: "assistant",
+              content: "older answer 2",
+              timestamp: 4,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-5",
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: 5,
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const fullEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-thread-starter-test",
+        sessionFile,
+      });
+      expect(fullEstimate).toBeGreaterThan(0);
+
+      const projectedEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-thread-starter-test",
+        sessionFile,
+        projectionTokenBudget: Math.max(1, (fullEstimate ?? 1) - 200),
+      });
+
+      expect(projectedEstimate).toBeGreaterThan(0);
+      expect(projectedEstimate).toBeLessThan(fullEstimate ?? Number.POSITIVE_INFINITY);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
