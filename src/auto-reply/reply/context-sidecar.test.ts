@@ -215,8 +215,10 @@ describe("buildInboundContextSidecar", () => {
       estimateMessagesTokens(fullProjection) - 200,
     );
 
-    expect(messageText(projected[0])).not.toContain("Chat history since last reply");
+    expect(messageText(projected[0])).toContain("Chat history since last reply");
+    expect(messageText(projected[0]).length).toBeLessThan(messageText(fullProjection[0]).length);
     expect(messageText(projected[2])).toContain("Chat history since last reply");
+    expect(messageText(projected[2])).toContain("older context 0");
   });
 
   it("keeps duplicated thread starter context on only the most recent older sidecar turn", () => {
@@ -286,5 +288,54 @@ describe("buildInboundContextSidecar", () => {
 
     expect(messageText(projected[0])).not.toContain("Thread starter (untrusted, for context)");
     expect(messageText(projected[2])).toContain("Thread starter (untrusted, for context)");
+  });
+
+  it("keeps a capped inbound-history slice before dropping older sidecar history entirely", () => {
+    const repeatedHistory = Array.from({ length: 4 }, (_, index) => ({
+      sender: "Bob",
+      timestampMs: index + 1,
+      body: `older context ${index} ${"x".repeat(1_500)}`,
+    }));
+    const messages = [
+      {
+        role: "user",
+        content: "older ask",
+        contextSidecar: {
+          formatVersion: 1,
+          history: repeatedHistory,
+          conversation: { historyCount: repeatedHistory.length },
+        },
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: "older answer",
+        timestamp: 2,
+      },
+      {
+        role: "user",
+        content: "latest ask",
+        contextSidecar: {
+          formatVersion: 1,
+          history: repeatedHistory,
+          conversation: { historyCount: repeatedHistory.length },
+        },
+        timestamp: 3,
+      },
+    ];
+
+    const fullProjection = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+    );
+    const trimHistoryProjection = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+      estimateMessagesTokens(fullProjection) - 400,
+    );
+
+    const trimmedOlderText = messageText(trimHistoryProjection[0]);
+    expect(trimmedOlderText).toContain("Chat history since last reply");
+    expect(trimmedOlderText).not.toContain("older context 0");
+    expect(trimmedOlderText).toContain("older context 3");
+    expect(trimmedOlderText.length).toBeLessThan(messageText(fullProjection[0]).length);
   });
 });

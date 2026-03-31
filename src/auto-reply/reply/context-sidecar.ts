@@ -72,6 +72,9 @@ type ContextSidecarProjectionOptions = {
   keepThreadStarterBody?: boolean;
 };
 
+const TRIM_HISTORY_MAX_ENTRIES = 2;
+const TRIM_HISTORY_MAX_BODY_CHARS = 400;
+
 type UserTextPart = {
   type: "text" | "input_text" | "output_text";
   text: string;
@@ -91,6 +94,29 @@ export function safeTrim(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function truncateProjectionText(value: string | undefined, maxChars: number): string | undefined {
+  if (!value) {
+    return value;
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function capProjectionHistory(
+  history: ContextSidecar["history"],
+): ContextSidecar["history"] | undefined {
+  if (!history?.length) {
+    return undefined;
+  }
+  const capped = history.slice(-TRIM_HISTORY_MAX_ENTRIES).map((entry) => ({
+    ...entry,
+    body: truncateProjectionText(entry.body, TRIM_HISTORY_MAX_BODY_CHARS),
+  }));
+  return capped.length > 0 ? capped : undefined;
 }
 
 function formatConversationTimestamp(
@@ -339,7 +365,7 @@ function projectContextSidecar(
     return {
       ...sidecar,
       forwarded: undefined,
-      history: undefined,
+      history: capProjectionHistory(sidecar.history),
       thread:
         keepThreadStarterBody && sidecar.thread?.starterBody
           ? {
