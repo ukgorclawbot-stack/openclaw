@@ -1,3 +1,4 @@
+import { normalizeContextSidecar } from "../auto-reply/reply/context-sidecar.js";
 import {
   extractInboundSenderLabel,
   stripInboundMetadata,
@@ -9,6 +10,12 @@ export { stripEnvelope };
 function extractMessageSenderLabel(entry: Record<string, unknown>): string | null {
   if (typeof entry.senderLabel === "string" && entry.senderLabel.trim()) {
     return entry.senderLabel.trim();
+  }
+  const sidecar = normalizeContextSidecar(entry.contextSidecar);
+  const sidecarSenderLabel =
+    sidecar?.sender?.label?.trim() || sidecar?.conversation?.sender?.trim();
+  if (sidecarSenderLabel) {
+    return sidecarSenderLabel;
   }
   if (typeof entry.content === "string") {
     return extractInboundSenderLabel(entry.content);

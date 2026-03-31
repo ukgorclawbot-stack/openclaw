@@ -71,6 +71,38 @@ describe("stripEnvelopeFromMessage", () => {
     expect(result.senderLabel).toBe("alice");
   });
 
+  test("derives senderLabel from contextSidecar sender metadata on clean user bodies", () => {
+    const input = {
+      role: "user",
+      content: "Actual user message",
+      contextSidecar: {
+        formatVersion: 1,
+        sender: {
+          label: "Alice",
+        },
+      },
+    };
+    const result = stripEnvelopeFromMessage(input) as { content?: string; senderLabel?: string };
+    expect(result.content).toBe("Actual user message");
+    expect(result.senderLabel).toBe("Alice");
+  });
+
+  test("falls back to contextSidecar conversation sender when sender block is absent", () => {
+    const input = {
+      role: "user",
+      content: "Actual user message",
+      contextSidecar: {
+        formatVersion: 1,
+        conversation: {
+          sender: "alice@example",
+        },
+      },
+    };
+    const result = stripEnvelopeFromMessage(input) as { content?: string; senderLabel?: string };
+    expect(result.content).toBe("Actual user message");
+    expect(result.senderLabel).toBe("alice@example");
+  });
+
   test("strips metadata-like blocks even when not a prefix", () => {
     const input = {
       role: "user",
