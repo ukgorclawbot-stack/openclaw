@@ -394,4 +394,64 @@ describe("buildInboundContextSidecar", () => {
     expect(olderProjectedText).not.toContain("x".repeat(1_200));
     expect(messageText(projected[2])).toContain("x".repeat(1_200));
   });
+
+  it("keeps a lightweight forwarded block on older sidecar turns before dropping it entirely", () => {
+    const repeatedSignature = `sig ${"x".repeat(2_500)}`;
+    const messages = [
+      {
+        role: "user",
+        content: "older ask",
+        contextSidecar: {
+          formatVersion: 1,
+          forwarded: {
+            from: "relay-bot",
+            type: "channel",
+            title: "Very Long Forward Title",
+            signature: repeatedSignature,
+          },
+          conversation: {
+            hasForwardedContext: true,
+          },
+        },
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: "older answer",
+        timestamp: 2,
+      },
+      {
+        role: "user",
+        content: "latest ask",
+        contextSidecar: {
+          formatVersion: 1,
+          forwarded: {
+            from: "relay-bot",
+            type: "channel",
+            title: "Very Long Forward Title",
+            signature: repeatedSignature,
+          },
+          conversation: {
+            hasForwardedContext: true,
+          },
+        },
+        timestamp: 3,
+      },
+    ];
+
+    const fullProjection = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+    );
+    const projected = projectHistoricalMessagesWithContextSidecarBudget(
+      messages as AgentMessage[],
+      estimateMessagesTokens(fullProjection) - 200,
+    );
+
+    const olderProjectedText = messageText(projected[0]);
+    expect(olderProjectedText).toContain("Forwarded message context (untrusted metadata)");
+    expect(olderProjectedText).toContain("relay-bot");
+    expect(olderProjectedText.length).toBeLessThan(messageText(fullProjection[0]).length);
+    expect(olderProjectedText).not.toContain("x".repeat(1_200));
+    expect(messageText(projected[2])).toContain("x".repeat(1_200));
+  });
 });

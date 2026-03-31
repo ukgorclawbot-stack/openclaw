@@ -389,4 +389,90 @@ describe("estimatePromptTokensFromSessionTranscript", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("keeps lightweight forwarded context before the more aggressive projection path", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-forwarded-cap-"));
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const repeatedSignature = `sig ${"x".repeat(2_500)}`;
+
+    try {
+      await fs.writeFile(
+        sessionFile,
+        [
+          JSON.stringify({
+            id: "entry-1",
+            message: {
+              role: "user",
+              content: "older ask",
+              contextSidecar: {
+                formatVersion: 1,
+                forwarded: {
+                  from: "relay-bot",
+                  type: "channel",
+                  title: "Very Long Forward Title",
+                  signature: repeatedSignature,
+                },
+                conversation: {
+                  hasForwardedContext: true,
+                },
+              },
+              timestamp: 1,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-2",
+            message: {
+              role: "assistant",
+              content: "older answer",
+              timestamp: 2,
+            },
+          }),
+          JSON.stringify({
+            id: "entry-3",
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                forwarded: {
+                  from: "relay-bot",
+                  type: "channel",
+                  title: "Very Long Forward Title",
+                  signature: repeatedSignature,
+                },
+                conversation: {
+                  hasForwardedContext: true,
+                },
+              },
+              timestamp: 3,
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const fullEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-forwarded-cap-test",
+        sessionFile,
+      });
+      expect(fullEstimate).toBeGreaterThan(0);
+
+      const cappedEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-forwarded-cap-test",
+        sessionFile,
+        projectionTokenBudget: Math.max(1, (fullEstimate ?? 1) - 200),
+      });
+      const fullyTrimmedEstimate = estimatePromptTokensFromSessionTranscript({
+        sessionId: "session-forwarded-cap-test",
+        sessionFile,
+        projectionTokenBudget: 1,
+      });
+
+      expect(cappedEstimate).toBeGreaterThan(0);
+      expect(cappedEstimate).toBeLessThan(fullEstimate ?? Number.POSITIVE_INFINITY);
+      expect(cappedEstimate).toBeGreaterThan(fullyTrimmedEstimate ?? 0);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

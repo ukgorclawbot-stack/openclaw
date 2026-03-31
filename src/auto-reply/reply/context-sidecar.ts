@@ -75,6 +75,8 @@ type ContextSidecarProjectionOptions = {
 const TRIM_HISTORY_MAX_ENTRIES = 2;
 const TRIM_HISTORY_MAX_BODY_CHARS = 400;
 const TRIM_REPLY_MAX_BODY_CHARS = 600;
+const TRIM_FORWARDED_MAX_TITLE_CHARS = 120;
+const TRIM_FORWARDED_MAX_SIGNATURE_CHARS = 160;
 
 type UserTextPart = {
   type: "text" | "input_text" | "output_text";
@@ -128,6 +130,23 @@ function capProjectionReply(reply: ContextSidecar["reply"]): ContextSidecar["rep
     senderLabel: reply.senderLabel,
     isQuote: reply.isQuote,
     body: truncateProjectionText(reply.body, TRIM_REPLY_MAX_BODY_CHARS),
+  });
+}
+
+function capProjectionForwarded(
+  forwarded: ContextSidecar["forwarded"],
+): ContextSidecar["forwarded"] | undefined {
+  if (!forwarded?.from) {
+    return undefined;
+  }
+  return pruneUndefined({
+    from: forwarded.from,
+    type: forwarded.type,
+    username: forwarded.username,
+    title: truncateProjectionText(forwarded.title, TRIM_FORWARDED_MAX_TITLE_CHARS),
+    signature: truncateProjectionText(forwarded.signature, TRIM_FORWARDED_MAX_SIGNATURE_CHARS),
+    chatType: forwarded.chatType,
+    dateMs: forwarded.dateMs,
   });
 }
 
@@ -376,7 +395,7 @@ function projectContextSidecar(
     const keepThreadStarterBody = options.keepThreadStarterBody !== false;
     return {
       ...sidecar,
-      forwarded: undefined,
+      forwarded: capProjectionForwarded(sidecar.forwarded),
       history: capProjectionHistory(sidecar.history),
       thread:
         keepThreadStarterBody && sidecar.thread?.starterBody
