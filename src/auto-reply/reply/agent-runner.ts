@@ -780,12 +780,14 @@ export async function runReplyAgent(params: {
       // Inject post-compaction workspace context for the next agent turn
       if (sessionKey) {
         const workspaceDir = followupRun.run.workspaceDir;
+        const refreshSkillsSnapshot =
+          followupRun.run.skillsSnapshot ?? activeSessionEntry?.skillsSnapshot;
         readPostCompactionContext(
           workspaceDir,
           cfg,
           undefined,
           latestAutoCompactionDetails,
-          followupRun.run.skillsSnapshot,
+          refreshSkillsSnapshot,
           sessionKey,
         )
           .then((contextContent) => {

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCanonicalFixtureSkill } from "../../agents/skills.test-helpers.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { loadSessionStore, saveSessionStore } from "../../config/sessions.js";
 import { onAgentEvent } from "../../infra/agent-events.js";
@@ -1111,6 +1112,109 @@ describe("runReplyAgent auto-compaction token update", () => {
         queuedSystemEvents.some(
           (event) =>
             event.includes('path="notes/phase3.md"') && event.includes("Phase 3 file refresher."),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("restores skill excerpts from the session snapshot when the run omits skillsSnapshot", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-compaction-skills-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const externalSkillsDir = path.join(tmp, "external-skills", "hooks");
+    const skillPath = path.join(externalSkillsDir, "SKILL.md");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.mkdir(externalSkillsDir, { recursive: true });
+    await fs.writeFile(
+      skillPath,
+      "---\nname: hooks\ndescription: Hook discipline\n---\n\n# hooks\nAlways verify before completion.\n",
+      "utf-8",
+    );
+
+    const storePath = path.join(tmp, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 10_000,
+      compactionCount: 0,
+      skillsSnapshot: {
+        prompt: "hooks",
+        skills: [{ name: "hooks" }],
+        resolvedSkills: [
+          createCanonicalFixtureSkill({
+            name: "hooks",
+            description: "Hook discipline",
+            filePath: skillPath,
+            baseDir: externalSkillsDir,
+            source: "workspace",
+          }),
+        ],
+      },
+    } satisfies Partial<SessionEntry>;
+
+    await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+    runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "done" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 11_000, output: 500, total: 11_500 },
+          lastCallUsage: { input: 10_500, output: 500, total: 11_000 },
+          compactionCount: 1,
+          autoCompactionSummaries: ["## Decisions\nKeep going."],
+          autoCompactionDetails: [
+            {
+              readFiles: [skillPath],
+            },
+          ],
+        },
+      },
+    });
+
+    const config = {
+      agents: { defaults: { compaction: { memoryFlush: { enabled: false } } } },
+    };
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath,
+      sessionEntry,
+      config,
+      workspaceDir,
+    });
+    delete (followupRun.run as { skillsSnapshot?: unknown }).skillsSnapshot;
+
+    await runReplyAgent({
+      commandBody: "hello",
+      followupRun,
+      queueKey: "main",
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      typing,
+      sessionCtx,
+      sessionEntry,
+      sessionStore: { [sessionKey]: sessionEntry as SessionEntry },
+      sessionKey,
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+      agentCfgContextTokens: 200_000,
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    await vi.waitFor(() => {
+      const queuedSystemEvents = peekSystemEvents(sessionKey);
+      expect(
+        queuedSystemEvents.some(
+          (event) =>
+            event.includes("Recent skill excerpts from before compaction") &&
+            event.includes(`path="${skillPath}"`) &&
+            event.includes("Always verify before completion."),
         ),
       ).toBe(true);
     });
