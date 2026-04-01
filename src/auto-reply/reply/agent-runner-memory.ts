@@ -5,6 +5,7 @@ import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-bu
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import { truncateOversizedToolResultsInMessages } from "../../agents/pi-embedded-runner/tool-result-truncation.js";
 import { compactEmbeddedPiSession, runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
@@ -33,6 +34,7 @@ import {
   buildEmbeddedRunExecutionParams,
   resolveModelFallbackOptions,
 } from "./agent-runner-utils.js";
+import { projectHistoricalMessagesWithContextSidecarBudget } from "./context-sidecar.js";
 import {
   hasAlreadyFlushedForCurrentCompaction,
   resolveMemoryFlushContextWindowTokens,
@@ -254,10 +256,12 @@ async function readLastNonzeroUsageFromSessionLog(logPath: string) {
   }
 }
 
-function estimatePromptTokensFromSessionTranscript(params: {
+export function estimatePromptTokensFromSessionTranscript(params: {
   sessionId?: string;
   storePath?: string;
   sessionFile?: string;
+  projectionTokenBudget?: number;
+  contextWindowTokens?: number;
 }): number | undefined {
   const sessionId = params.sessionId?.trim();
   if (!sessionId) {
@@ -272,7 +276,16 @@ function estimatePromptTokensFromSessionTranscript(params: {
     if (messages.length === 0) {
       return undefined;
     }
-    const estimatedTokens = estimateMessagesTokens(messages);
+    const projectedMessages = projectHistoricalMessagesWithContextSidecarBudget(
+      messages,
+      params.projectionTokenBudget,
+    );
+    const promptMessages =
+      typeof params.contextWindowTokens === "number" && Number.isFinite(params.contextWindowTokens)
+        ? truncateOversizedToolResultsInMessages(projectedMessages, params.contextWindowTokens)
+            .messages
+        : projectedMessages;
+    const estimatedTokens = estimateMessagesTokens(promptMessages);
     if (!Number.isFinite(estimatedTokens) || estimatedTokens <= 0) {
       return undefined;
     }
@@ -347,9 +360,11 @@ export async function runPreflightCompactionIfNeeded(params: {
   if (!shouldUseTranscriptFallback) {
     return entry ?? params.sessionEntry;
   }
+  const threshold = contextWindowTokens - reserveTokensFloor - softThresholdTokens;
   const promptTokenEstimate = estimatePromptTokensForMemoryFlush(
     params.promptForEstimate ?? params.followupRun.prompt,
   );
+  const projectionTokenBudget = Math.max(0, threshold - Math.max(0, promptTokenEstimate ?? 0));
   const transcriptPromptTokens =
     typeof freshPersistedTokens === "number"
       ? undefined
@@ -357,6 +372,8 @@ export async function runPreflightCompactionIfNeeded(params: {
           sessionId: entry.sessionId,
           storePath: params.storePath,
           sessionFile: entry.sessionFile ?? params.followupRun.run.sessionFile,
+          ...(projectionTokenBudget > 0 ? { projectionTokenBudget } : {}),
+          contextWindowTokens,
         });
   const projectedTokenCount =
     typeof transcriptPromptTokens === "number"
@@ -368,8 +385,6 @@ export async function runPreflightCompactionIfNeeded(params: {
     projectedTokenCount > 0
       ? projectedTokenCount
       : undefined;
-
-  const threshold = contextWindowTokens - reserveTokensFloor - softThresholdTokens;
   logVerbose(
     `preflightCompaction check: sessionKey=${params.sessionKey} ` +
       `tokenCount=${tokenCountForCompaction ?? freshPersistedTokens ?? "undefined"} ` +
@@ -377,7 +392,8 @@ export async function runPreflightCompactionIfNeeded(params: {
       `isHeartbeat=${params.isHeartbeat} isCli=${isCli} ` +
       `persistedFresh=${entry?.totalTokensFresh === true} ` +
       `transcriptPromptTokens=${transcriptPromptTokens ?? "undefined"} ` +
-      `promptTokensEst=${promptTokenEstimate ?? "undefined"}`,
+      `promptTokensEst=${promptTokenEstimate ?? "undefined"} ` +
+      `projectionBudget=${projectionTokenBudget > 0 ? projectionTokenBudget : "undefined"}`,
   );
 
   const shouldCompact = shouldRunPreflightCompaction({

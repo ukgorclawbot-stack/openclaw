@@ -119,6 +119,29 @@ Actual user message`,
     expect(text).toBe("Actual user message");
   });
 
+  it("preserves clean sidecar-backed user bodies even when they look like legacy metadata", () => {
+    const text = extractTextFromMessage({
+      role: "user",
+      content: `Conversation info (untrusted metadata):
+\`\`\`json
+{
+  "message_id": "abc123"
+}
+\`\`\`
+
+Actual user message`,
+      contextSidecar: {
+        formatVersion: 1,
+        conversation: {
+          messageId: "abc123",
+        },
+      },
+    });
+
+    expect(text).toContain("Conversation info (untrusted metadata):");
+    expect(text).toContain("Actual user message");
+  });
+
   it("keeps metadata-like blocks for non-user messages", () => {
     const text = extractTextFromMessage({
       role: "assistant",

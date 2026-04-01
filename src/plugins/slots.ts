@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../config/config.js";
 import type { PluginSlotsConfig } from "../config/types.plugins.js";
+import { SESSION_CONTEXT_V2_ENGINE_ID } from "../context-engine/ids.js";
 import type { PluginKind } from "./types.js";
 
 export type PluginSlotKey = keyof PluginSlotsConfig;
@@ -16,7 +17,7 @@ const SLOT_BY_KIND: Record<PluginKind, PluginSlotKey> = {
 
 const DEFAULT_SLOT_BY_KEY: Record<PluginSlotKey, string> = {
   memory: "memory-core",
-  contextEngine: "legacy",
+  contextEngine: SESSION_CONTEXT_V2_ENGINE_ID,
 };
 
 /** Normalize a kind field to an array for uniform iteration. */

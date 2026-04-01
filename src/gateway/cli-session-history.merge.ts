@@ -1,4 +1,4 @@
-import { stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
+import { stripVisibleUserText } from "../auto-reply/reply/strip-inbound-meta.js";
 
 const DEDUPE_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -28,7 +28,7 @@ function extractComparableText(message: unknown): string | undefined {
   if (!joined) {
     return undefined;
   }
-  const visible = role === "user" ? stripInboundMetadata(joined) : joined;
+  const visible = role === "user" ? stripVisibleUserText(joined, message) : joined;
   const normalized = visible.replace(/\s+/g, " ").trim();
   return normalized || undefined;
 }

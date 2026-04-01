@@ -231,6 +231,44 @@ describe("cli session history", () => {
     });
   });
 
+  it("does not dedupe clean sidecar-backed user messages by stripping legacy-looking text", () => {
+    const localMessages = [
+      {
+        role: "user",
+        content: "Actual user message",
+        timestamp: Date.parse("2026-03-26T16:29:54.800Z"),
+      },
+    ];
+    const importedMessages = [
+      {
+        role: "user",
+        content:
+          'Conversation info (untrusted metadata):\n```json\n{"message_id":"123"}\n```\n\nActual user message',
+        contextSidecar: {
+          formatVersion: 1,
+          conversation: {
+            messageId: "123",
+          },
+        },
+        timestamp: Date.parse("2026-03-26T16:29:55.000Z"),
+        __openclaw: {
+          importedFrom: "claude-cli",
+          externalId: "user-sidecar-1",
+          cliSessionId: "session-1",
+        },
+      },
+    ];
+
+    const merged = mergeImportedChatHistoryMessages({ localMessages, importedMessages });
+    expect(merged).toHaveLength(2);
+    expect(merged[1]).toMatchObject({
+      role: "user",
+      contextSidecar: {
+        formatVersion: 1,
+      },
+    });
+  });
+
   it("augments chat history when a session has a claude-cli binding", async () => {
     await withClaudeProjectsDir(async ({ homeDir, sessionId }) => {
       const messages = augmentChatHistoryWithCliSessionImports({

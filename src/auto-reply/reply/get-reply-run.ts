@@ -30,6 +30,7 @@ import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { applySessionHints } from "./body.js";
 import type { buildCommandContext } from "./commands.js";
+import { buildInboundContextSidecar } from "./context-sidecar.js";
 import type { InlineDirectives } from "./directive-handling.js";
 import { buildGroupChatContext, buildGroupIntro } from "./groups.js";
 import { buildInboundMetaSystemPrompt, buildInboundUserContextPrefix } from "./inbound-meta.js";
@@ -323,17 +324,16 @@ export async function runPreparedReply(
     ((baseBodyTrimmedRaw.length === 0 && rawBodyTrimmed.length > 0) || isBareNewOrReset);
   const baseBodyFinal = isBareSessionReset ? buildBareSessionResetPrompt(cfg) : baseBody;
   const envelopeOptions = resolveEnvelopeFormatOptions(cfg);
-  const inboundUserContext = buildInboundUserContextPrefix(
-    isNewSession
-      ? {
-          ...sessionCtx,
-          ...(sessionCtx.ThreadHistoryBody?.trim()
-            ? { InboundHistory: undefined, ThreadStarterBody: undefined }
-            : {}),
-        }
-      : { ...sessionCtx, ThreadStarterBody: undefined },
-    envelopeOptions,
-  );
+  const inboundContextSource = isNewSession
+    ? {
+        ...sessionCtx,
+        ...(sessionCtx.ThreadHistoryBody?.trim()
+          ? { InboundHistory: undefined, ThreadStarterBody: undefined }
+          : {}),
+      }
+    : { ...sessionCtx, ThreadStarterBody: undefined };
+  const inboundUserContext = buildInboundUserContextPrefix(inboundContextSource, envelopeOptions);
+  const inboundContextSidecar = buildInboundContextSidecar(inboundContextSource, envelopeOptions);
   const baseBodyForPrompt = isBareSessionReset
     ? baseBodyFinal
     : [inboundUserContext, baseBodyFinal].filter(Boolean).join("\n\n");
@@ -354,6 +354,11 @@ export async function runPreparedReply(
   const effectiveBaseBody = baseBodyTrimmed
     ? baseBodyForPrompt
     : "[User sent media without caption]";
+  const persistedUserContent = baseBodyFinal.trim()
+    ? baseBodyFinal
+    : hasMediaAttachment
+      ? "[User sent media without caption]"
+      : baseBodyFinal;
   let prefixedBodyBase = await applySessionHints({
     baseBody: effectiveBaseBody,
     abortedLastRun,
@@ -579,6 +584,10 @@ export async function runPreparedReply(
       blockReplyBreak: resolvedBlockStreamingBreak,
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
+      persistedUserMessage: {
+        content: persistedUserContent,
+        contextSidecar: inboundContextSidecar,
+      },
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
       ...(isReasoningTagProvider(provider) ? { enforceFinalTag: true } : {}),
     },

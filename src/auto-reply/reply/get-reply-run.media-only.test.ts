@@ -22,6 +22,10 @@ vi.mock("../../config/sessions/paths.js", () => ({
 
 const storeRuntimeLoads = vi.hoisted(() => vi.fn());
 const updateSessionStore = vi.hoisted(() => vi.fn());
+const buildInboundUserContextPrefixMock = vi.hoisted(() => vi.fn().mockReturnValue(""));
+const buildInboundContextSidecarMock = vi.hoisted(() =>
+  vi.fn().mockReturnValue({ formatVersion: 1 }),
+);
 
 vi.mock("../../config/sessions/store.runtime.js", () => {
   storeRuntimeLoads();
@@ -67,7 +71,11 @@ vi.mock("./groups.js", () => ({
 
 vi.mock("./inbound-meta.js", () => ({
   buildInboundMetaSystemPrompt: vi.fn().mockReturnValue(""),
-  buildInboundUserContextPrefix: vi.fn().mockReturnValue(""),
+  buildInboundUserContextPrefix: buildInboundUserContextPrefixMock,
+}));
+
+vi.mock("./context-sidecar.js", () => ({
+  buildInboundContextSidecar: buildInboundContextSidecarMock,
 }));
 
 vi.mock("./queue/settings.js", () => ({
@@ -189,6 +197,8 @@ describe("runPreparedReply media-only handling", () => {
   beforeEach(async () => {
     storeRuntimeLoads.mockClear();
     updateSessionStore.mockReset();
+    buildInboundUserContextPrefixMock.mockReset().mockReturnValue("");
+    buildInboundContextSidecarMock.mockReset().mockReturnValue({ formatVersion: 1 });
     vi.clearAllMocks();
     await loadFreshGetReplyRunModuleForTest();
   });
@@ -222,6 +232,49 @@ describe("runPreparedReply media-only handling", () => {
     expect(call).toBeTruthy();
     expect(call?.followupRun.prompt).toContain("[Thread history - for context]");
     expect(call?.followupRun.prompt).toContain("Earlier message in this thread");
+  });
+
+  it("keeps prefixed prompt behavior while passing a clean persisted user message override", async () => {
+    buildInboundUserContextPrefixMock.mockReturnValue(
+      "Conversation info (untrusted metadata):\n```json\n{}\n```",
+    );
+    buildInboundContextSidecarMock.mockReturnValue({
+      formatVersion: 1,
+      reply: { body: "quoted body" },
+    });
+
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "tell me about cats",
+          RawBody: "tell me about cats",
+          CommandBody: "tell me about cats",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "tell me about cats",
+          BodyStripped: "tell me about cats",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+      }),
+    );
+    expect(result).toEqual({ text: "ok" });
+
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.commandBody).toContain("Conversation info (untrusted metadata):");
+    expect(call?.followupRun.prompt).toContain("Conversation info (untrusted metadata):");
+    expect(call?.followupRun.run.persistedUserMessage).toEqual({
+      content: "tell me about cats",
+      contextSidecar: {
+        formatVersion: 1,
+        reply: { body: "quoted body" },
+      },
+    });
   });
 
   it("returns the empty-body reply when there is no text and no media", async () => {

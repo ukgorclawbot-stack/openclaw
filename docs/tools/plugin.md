@@ -187,16 +187,16 @@ Some categories are exclusive (only one active at a time):
   plugins: {
     slots: {
       memory: "memory-core", // or "none" to disable
-      contextEngine: "legacy", // or a plugin id
+      contextEngine: "session-context-v2", // or a plugin id
     },
   },
 }
 ```
 
-| Slot            | What it controls      | Default             |
-| --------------- | --------------------- | ------------------- |
-| `memory`        | Active memory plugin  | `memory-core`       |
-| `contextEngine` | Active context engine | `legacy` (built-in) |
+| Slot            | What it controls      | Default                                                                    |
+| --------------- | --------------------- | -------------------------------------------------------------------------- |
+| `memory`        | Active memory plugin  | `memory-core`                                                              |
+| `contextEngine` | Active context engine | `session-context-v2` (built-in, `legacy` remains as a compatibility alias) |
 
 ## CLI reference
 

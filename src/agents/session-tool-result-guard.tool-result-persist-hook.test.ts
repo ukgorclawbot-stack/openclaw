@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { describe, expect, it, afterEach } from "vitest";
+import type { ContextSidecar } from "../auto-reply/reply/context-sidecar.js";
 import {
   initializeGlobalHookRunner,
   resetGlobalHookRunner,
@@ -177,5 +178,71 @@ describe("before_message_write hook", () => {
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("user");
+  });
+});
+
+describe("persisted user message override", () => {
+  it("rewrites persisted user content and attaches context sidecar for user messages", () => {
+    const contextSidecar: ContextSidecar = {
+      formatVersion: 1,
+      reply: {
+        body: "quoted body",
+      },
+    };
+    const sm = guardSessionManager(SessionManager.inMemory(), {
+      agentId: "main",
+      sessionKey: "main",
+      persistedUserMessage: {
+        content: "clean user text",
+        contextSidecar,
+      },
+    });
+    const appendMessage = sm.appendMessage.bind(sm) as unknown as (message: AgentMessage) => void;
+    appendMessage({
+      role: "user",
+      content: "Conversation info (untrusted metadata):\n```json\n{}\n```\n\nclean user text",
+      timestamp: Date.now(),
+    } as AgentMessage);
+
+    const messages = sm
+      .getEntries()
+      .filter((e) => e.type === "message")
+      .map((e) => (e as { message: AgentMessage & { contextSidecar?: ContextSidecar } }).message);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: "clean user text",
+      contextSidecar,
+    });
+  });
+
+  it("preserves non-text content blocks when rewriting persisted user content", () => {
+    const sm = guardSessionManager(SessionManager.inMemory(), {
+      agentId: "main",
+      sessionKey: "main",
+      persistedUserMessage: {
+        content: "[User sent media without caption]",
+      },
+    });
+    const appendMessage = sm.appendMessage.bind(sm) as unknown as (message: AgentMessage) => void;
+    appendMessage({
+      role: "user",
+      content: [
+        { type: "text", text: "old prefixed text" },
+        { type: "image", data: "abc", mimeType: "image/png" },
+      ],
+      timestamp: Date.now(),
+    } as AgentMessage);
+
+    const messages = sm
+      .getEntries()
+      .filter((e) => e.type === "message")
+      .map((e) => (e as { message: AgentMessage & { content?: unknown } }).message);
+
+    expect(messages[0]?.content).toEqual([
+      { type: "text", text: "[User sent media without caption]" },
+      { type: "image", data: "abc", mimeType: "image/png" },
+    ]);
   });
 });

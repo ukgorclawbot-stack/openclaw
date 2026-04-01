@@ -50,6 +50,8 @@ export const triggerInternalHook: Mock<(event?: unknown) => void> = vi.fn();
 export const sanitizeSessionHistoryMock = vi.fn(
   async (params: { messages: unknown[] }) => params.messages,
 );
+export const getDmHistoryLimitFromSessionKeyMock = vi.fn(() => undefined);
+export const limitHistoryTurnsMock = vi.fn((msgs: unknown[]) => msgs.slice(0, 2));
 export const getMemorySearchManagerMock: Mock<
   (params?: unknown) => Promise<MockMemorySearchManager>
 > = vi.fn(async () => ({
@@ -87,6 +89,10 @@ export function resetCompactSessionStateMocks(): void {
   sanitizeSessionHistoryMock.mockImplementation(async (params: { messages: unknown[] }) => {
     return params.messages;
   });
+  getDmHistoryLimitFromSessionKeyMock.mockReset();
+  getDmHistoryLimitFromSessionKeyMock.mockReturnValue(undefined);
+  limitHistoryTurnsMock.mockReset();
+  limitHistoryTurnsMock.mockImplementation((msgs: unknown[]) => msgs.slice(0, 2));
 
   getMemorySearchManagerMock.mockReset();
   getMemorySearchManagerMock.mockResolvedValue({
@@ -225,8 +231,12 @@ export async function loadCompactHooksHarness(): Promise<{
           streamFn: vi.fn(),
         },
         compact: vi.fn(async () => {
+          const snapshot =
+            typeof structuredClone === "function"
+              ? structuredClone(session.messages)
+              : JSON.parse(JSON.stringify(session.messages));
           session.messages.splice(1);
-          return await sessionCompactImpl();
+          return await sessionCompactImpl(snapshot);
         }),
         abortCompaction: sessionAbortCompactionMock,
         dispose: vi.fn(),
@@ -241,6 +251,7 @@ export async function loadCompactHooksHarness(): Promise<{
       create: vi.fn(() => ({})),
     },
     estimateTokens: estimateTokensMock,
+    generateSummary: vi.fn(async () => "summary"),
   }));
 
   vi.doMock("../session-tool-result-guard-wrapper.js", () => ({
@@ -397,8 +408,8 @@ export async function loadCompactHooksHarness(): Promise<{
   }));
 
   vi.doMock("./history.js", () => ({
-    getDmHistoryLimitFromSessionKey: vi.fn(() => undefined),
-    limitHistoryTurns: vi.fn((msgs: unknown[]) => msgs.slice(0, 2)),
+    getDmHistoryLimitFromSessionKey: getDmHistoryLimitFromSessionKeyMock,
+    limitHistoryTurns: limitHistoryTurnsMock,
   }));
 
   vi.doMock("../skills.js", () => ({

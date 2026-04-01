@@ -1885,6 +1885,651 @@ describe("runReplyAgent memory flush", () => {
     });
   });
 
+  it("skips preflight compaction when sidecar projection trims older history below the threshold", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "session-relative.jsonl";
+      const workspaceDir = path.dirname(storePath);
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      const repeatedHistory = Array.from({ length: 4 }, (_, index) => ({
+        sender: "Bob",
+        timestampMs: index + 1,
+        body: `older context ${index} ${"x".repeat(120_000)}`,
+      }));
+
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask",
+              contextSidecar: {
+                formatVersion: 1,
+                history: repeatedHistory,
+                conversation: { historyCount: repeatedHistory.length },
+              },
+              timestamp: Date.now(),
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer",
+              timestamp: Date.now() + 1,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                history: [{ sender: "Bob", timestampMs: 9, body: "small context" }],
+                conversation: { historyCount: 1 },
+              },
+              timestamp: Date.now() + 2,
+            },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({
+          prompt: params.prompt,
+          extraSystemPrompt: params.extraSystemPrompt,
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile, workspaceDir },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(state.compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt ?? "").not.toContain("Post-compaction context refresh");
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].compactionCount).toBe(1);
+    });
+  });
+
+  it("skips preflight compaction when tool-result truncation drops transcript below the threshold", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "session-relative.jsonl";
+      const workspaceDir = path.dirname(storePath);
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      const oversizedToolResult = `tool output ${"x".repeat(360_000)}`;
+
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask",
+              timestamp: Date.now(),
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "tool reply",
+              timestamp: Date.now() + 1,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "toolResult",
+              content: [{ type: "text", text: oversizedToolResult }],
+              timestamp: Date.now() + 2,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "latest ask",
+              timestamp: Date.now() + 3,
+            },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({
+          prompt: params.prompt,
+          extraSystemPrompt: params.extraSystemPrompt,
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile, workspaceDir },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(state.compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt ?? "").not.toContain("Post-compaction context refresh");
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].compactionCount).toBe(1);
+    });
+  });
+
+  it("skips preflight compaction when projection deduplicates repeated thread starter context", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "session-relative.jsonl";
+      const workspaceDir = path.dirname(storePath);
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      const repeatedThreadStarter = `starter ${"x".repeat(120_000)}`;
+
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask 1",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: Date.now(),
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer 1",
+              timestamp: Date.now() + 1,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask 2",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: Date.now() + 2,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer 2",
+              timestamp: Date.now() + 3,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: Date.now() + 4,
+            },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({
+          prompt: params.prompt,
+          extraSystemPrompt: params.extraSystemPrompt,
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile, workspaceDir },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(state.compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt ?? "").not.toContain("Post-compaction context refresh");
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].compactionCount).toBe(1);
+    });
+  });
+
+  it("skips preflight compaction when projection caps repeated reply context", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "session-relative.jsonl";
+      const workspaceDir = path.dirname(storePath);
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      const repeatedReplyBody = `quoted ${"x".repeat(120_000)}`;
+
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask",
+              contextSidecar: {
+                formatVersion: 1,
+                reply: {
+                  senderLabel: "Alice",
+                  body: repeatedReplyBody,
+                },
+                conversation: {
+                  hasReplyContext: true,
+                },
+              },
+              timestamp: Date.now(),
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer",
+              timestamp: Date.now() + 1,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                reply: {
+                  senderLabel: "Alice",
+                  body: repeatedReplyBody,
+                },
+                conversation: {
+                  hasReplyContext: true,
+                },
+              },
+              timestamp: Date.now() + 2,
+            },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({
+          prompt: params.prompt,
+          extraSystemPrompt: params.extraSystemPrompt,
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile, workspaceDir },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(state.compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt ?? "").not.toContain("Post-compaction context refresh");
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].compactionCount).toBe(1);
+    });
+  });
+
+  it("skips preflight compaction when projection keeps lightweight forwarded context", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "session-relative.jsonl";
+      const workspaceDir = path.dirname(storePath);
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      const repeatedSignature = `sig ${"x".repeat(120_000)}`;
+
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask",
+              contextSidecar: {
+                formatVersion: 1,
+                forwarded: {
+                  from: "relay-bot",
+                  type: "channel",
+                  title: "Very Long Forward Title",
+                  signature: repeatedSignature,
+                },
+                conversation: {
+                  hasForwardedContext: true,
+                },
+              },
+              timestamp: Date.now(),
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer",
+              timestamp: Date.now() + 1,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                forwarded: {
+                  from: "relay-bot",
+                  type: "channel",
+                  title: "Very Long Forward Title",
+                  signature: repeatedSignature,
+                },
+                conversation: {
+                  hasForwardedContext: true,
+                },
+              },
+              timestamp: Date.now() + 2,
+            },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({
+          prompt: params.prompt,
+          extraSystemPrompt: params.extraSystemPrompt,
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile, workspaceDir },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(state.compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt ?? "").not.toContain("Post-compaction context refresh");
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].compactionCount).toBe(1);
+    });
+  });
+
+  it("skips preflight compaction when projection caps retained thread starter context", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "session-relative.jsonl";
+      const workspaceDir = path.dirname(storePath);
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      const repeatedThreadStarter = `starter ${"x".repeat(120_000)}`;
+
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask 1",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: Date.now(),
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer 1",
+              timestamp: Date.now() + 1,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "older ask 2",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: Date.now() + 2,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: "older answer 2",
+              timestamp: Date.now() + 3,
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "user",
+              content: "latest ask",
+              contextSidecar: {
+                formatVersion: 1,
+                thread: {
+                  starterBody: repeatedThreadStarter,
+                },
+                conversation: {
+                  hasThreadStarter: true,
+                },
+              },
+              timestamp: Date.now() + 4,
+            },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({
+          prompt: params.prompt,
+          extraSystemPrompt: params.extraSystemPrompt,
+        });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile, workspaceDir },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(state.compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt ?? "").not.toContain("Post-compaction context refresh");
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].compactionCount).toBe(1);
+    });
+  });
+
   it("uses configured prompts for memory flush runs", async () => {
     await withTempStore(async (storePath) => {
       const sessionKey = "main";
