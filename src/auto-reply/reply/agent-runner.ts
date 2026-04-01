@@ -786,6 +786,7 @@ export async function runReplyAgent(params: {
           undefined,
           latestAutoCompactionDetails,
           followupRun.run.skillsSnapshot,
+          sessionKey,
         )
           .then((contextContent) => {
             if (contextContent) {

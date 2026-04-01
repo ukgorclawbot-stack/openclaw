@@ -221,6 +221,7 @@ async function appendPostCompactionRefreshPrompt(params: {
     undefined,
     params.details,
     params.skillsSnapshot ?? params.followupRun.run.skillsSnapshot,
+    params.followupRun.run.sessionKey,
   );
   if (!refreshPrompt) {
     return;

@@ -3,8 +3,10 @@ import path from "node:path";
 import { resolveCronStyleNow } from "../../agents/current-time.js";
 import { resolveUserTimezone } from "../../agents/date-time.js";
 import type { SkillSnapshot } from "../../agents/skills.js";
+import { listDescendantRunsForRequester } from "../../agents/subagent-registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { openBoundaryFile } from "../../infra/boundary-file-read.js";
+import { formatRunLabel, formatRunStatus, sortSubagentRuns } from "./subagents-utils.js";
 
 const MAX_CONTEXT_CHARS = 3000;
 const MAX_FILE_EXCERPTS = 3;
@@ -13,6 +15,8 @@ const MAX_FILE_EXCERPTS_TOTAL_CHARS = 1800;
 const MAX_SKILL_EXCERPTS = 2;
 const MAX_SKILL_EXCERPT_CHARS = 600;
 const MAX_SKILL_EXCERPTS_TOTAL_CHARS = 1200;
+const MAX_SUBAGENT_STATE_ENTRIES = 4;
+const MAX_SUBAGENT_STATE_CHARS = 1200;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
@@ -201,6 +205,45 @@ async function buildPostCompactionSkillExcerpts(params: {
   return ["Recent skill excerpts from before compaction:", ...blocks].join("\n\n");
 }
 
+function buildPostCompactionSubagentState(sessionKey?: string): string | null {
+  const trimmedSessionKey = sessionKey?.trim();
+  if (!trimmedSessionKey) {
+    return null;
+  }
+
+  const relevantRuns = sortSubagentRuns(listDescendantRunsForRequester(trimmedSessionKey)).filter(
+    (entry) => typeof entry.endedAt !== "number" || typeof entry.cleanupCompletedAt !== "number",
+  );
+  if (relevantRuns.length === 0) {
+    return null;
+  }
+
+  const lines = ["Recent subagent state from before compaction:"];
+  let usedChars = lines[0].length;
+  let added = 0;
+  for (const entry of relevantRuns) {
+    if (added >= MAX_SUBAGENT_STATE_ENTRIES) {
+      break;
+    }
+    const status =
+      typeof entry.endedAt !== "number" ? "running" : `${formatRunStatus(entry)} pending delivery`;
+    const baseLine = `- ${status}: ${formatRunLabel(entry, { maxLength: 48 })} (session ${entry.childSessionKey}, run ${entry.runId.slice(0, 8)})`;
+    const suffix =
+      entry.outcome?.status === "error" && entry.outcome.error?.trim()
+        ? ` error=${entry.outcome.error.trim()}`
+        : "";
+    const line = `${baseLine}${suffix}`;
+    if (usedChars + 1 + line.length > MAX_SUBAGENT_STATE_CHARS) {
+      break;
+    }
+    lines.push(line);
+    usedChars += 1 + line.length;
+    added += 1;
+  }
+
+  return lines.length > 1 ? lines.join("\n") : null;
+}
+
 // Compare configured section names as a case-insensitive set so deployments can
 // pin the documented defaults in any order without changing fallback semantics.
 function matchesSectionSet(sectionNames: string[], expectedSections: string[]): boolean {
@@ -258,6 +301,7 @@ export async function readPostCompactionContext(
   nowMs?: number,
   workspaceDetails?: unknown,
   skillsSnapshot?: SkillSnapshot,
+  sessionKey?: string,
 ): Promise<string | null> {
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
   const fileExcerpts = await buildPostCompactionFileExcerpts(workspaceDir, workspaceDetails);
@@ -266,11 +310,12 @@ export async function readPostCompactionContext(
     details: workspaceDetails,
     skillsSnapshot,
   });
+  const subagentState = buildPostCompactionSubagentState(sessionKey);
   const fallbackFromFileExcerpts = () =>
-    fileExcerpts || skillExcerpts
+    fileExcerpts || skillExcerpts || subagentState
       ? [
           "[Post-compaction context refresh]",
-          [fileExcerpts, skillExcerpts].filter(Boolean).join("\n\n"),
+          [fileExcerpts, skillExcerpts, subagentState].filter(Boolean).join("\n\n"),
           resolveCronStyleNow(cfg ?? {}, nowMs ?? Date.now()).timeLine,
         ].join("\n\n")
       : null;
@@ -318,7 +363,7 @@ export async function readPostCompactionContext(
       sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS, foundSectionNames);
     }
 
-    if (sections.length === 0 && !fileExcerpts && !skillExcerpts) {
+    if (sections.length === 0 && !fileExcerpts && !skillExcerpts && !subagentState) {
       return null;
     }
 
@@ -361,6 +406,9 @@ export async function readPostCompactionContext(
     }
     if (skillExcerpts) {
       segments.push(skillExcerpts.replaceAll("YYYY-MM-DD", dateStamp));
+    }
+    if (subagentState) {
+      segments.push(subagentState.replaceAll("YYYY-MM-DD", dateStamp));
     }
     segments.push(timeLine);
     return segments.join("\n\n");

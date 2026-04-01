@@ -3,6 +3,10 @@ import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { type SkillSnapshot } from "../../agents/skills.js";
 import { createCanonicalFixtureSkill } from "../../agents/skills.test-helpers.js";
+import {
+  addSubagentRunForTests,
+  resetSubagentRegistryForTests,
+} from "../../agents/subagent-registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { readPostCompactionContext } from "./post-compaction-context.js";
 
@@ -15,6 +19,7 @@ describe("readPostCompactionContext", () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    resetSubagentRegistryForTests({ persist: false });
   });
 
   async function expectLegacySectionFallback(
@@ -104,6 +109,37 @@ describe("readPostCompactionContext", () => {
     } finally {
       fs.rmSync(externalSkillsDir, { recursive: true, force: true });
     }
+  });
+
+  it("returns active subagent state when compaction happens while descendants are still pending", async () => {
+    addSubagentRunForTests({
+      runId: "run-subagent-active",
+      childSessionKey: "agent:main:main:subagent:worker",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "inspect compaction gap",
+      label: "worker",
+      cleanup: "keep",
+      createdAt: 1,
+      startedAt: 2,
+      cleanupHandled: false,
+    });
+
+    const result = await readPostCompactionContext(
+      tmpDir,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "agent:main:main",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("Recent subagent state from before compaction");
+    expect(result).toContain("worker");
+    expect(result).toContain("running");
+    expect(result).toContain("agent:main:main:subagent:worker");
+    expect(result).toContain("run-suba");
   });
 
   it("returns null when AGENTS.md has no relevant sections", async () => {

@@ -435,6 +435,7 @@ export function createFollowupRunner(params: {
             undefined,
             latestAutoCompactionDetails,
             refreshSkillsSnapshot,
+            targetSessionKey,
           )
             .then((contextContent) => {
               if (contextContent) {
