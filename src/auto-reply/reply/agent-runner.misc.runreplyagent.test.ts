@@ -930,6 +930,92 @@ describe("runReplyAgent auto-compaction token update", () => {
       ),
     ).toBe(true);
   });
+
+  it("reads post-compaction AGENTS context from the run workspace instead of process cwd", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-compaction-workspace-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const otherDir = path.join(tmp, "other");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.mkdir(otherDir, { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "AGENTS.md"),
+      ["## Session Startup", "Read WORKSPACE AGENTS.", "", "## Red Lines", "Never skip it."].join(
+        "\n",
+      ),
+      "utf-8",
+    );
+
+    const storePath = path.join(tmp, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 10_000,
+      compactionCount: 0,
+    };
+
+    await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+    runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "done" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 11_000, output: 500, total: 11_500 },
+          lastCallUsage: { input: 10_500, output: 500, total: 11_000 },
+          compactionCount: 1,
+          autoCompactionSummaries: ["## Decisions\nKeep going."],
+        },
+      },
+    });
+
+    const config = {
+      agents: { defaults: { compaction: { memoryFlush: { enabled: false } } } },
+    };
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath,
+      sessionEntry,
+      config,
+      workspaceDir,
+    });
+
+    const originalCwd = process.cwd();
+    process.chdir(otherDir);
+    try {
+      await runReplyAgent({
+        commandBody: "hello",
+        followupRun,
+        queueKey: "main",
+        resolvedQueue,
+        shouldSteer: false,
+        shouldFollowup: false,
+        isActive: false,
+        isStreaming: false,
+        typing,
+        sessionCtx,
+        sessionEntry,
+        sessionStore: { [sessionKey]: sessionEntry },
+        sessionKey,
+        storePath,
+        defaultModel: "anthropic/claude-opus-4-5",
+        agentCfgContextTokens: 200_000,
+        resolvedVerboseLevel: "off",
+        isNewSession: false,
+        blockStreamingEnabled: false,
+        resolvedBlockStreamingBreak: "message_end",
+        shouldInjectGroupIntro: false,
+        typingMode: "instant",
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    await vi.waitFor(() => {
+      const queuedSystemEvents = peekSystemEvents(sessionKey);
+      expect(queuedSystemEvents.some((event) => event.includes("Read WORKSPACE AGENTS."))).toBe(
+        true,
+      );
+    });
+  });
 });
 
 describe("runReplyAgent block streaming", () => {

@@ -407,7 +407,7 @@ export function createFollowupRunner(params: {
           );
         }
         if (targetSessionKey) {
-          const workspaceDir = process.cwd();
+          const workspaceDir = queued.run.workspaceDir;
           readPostCompactionContext(workspaceDir, queued.run.config)
             .then((contextContent) => {
               if (contextContent) {

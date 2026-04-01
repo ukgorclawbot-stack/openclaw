@@ -490,6 +490,76 @@ describe("createFollowupRunner compaction", () => {
     ).toBe(true);
   });
 
+  it("reads post-compaction AGENTS context from the followup workspace instead of process cwd", async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), "openclaw-followup-workspace-"));
+    const workspaceDir = path.join(rootDir, "workspace");
+    const otherDir = path.join(rootDir, "other");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.mkdir(otherDir, { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "AGENTS.md"),
+      ["## Session Startup", "Read FOLLOWUP WORKSPACE.", "", "## Red Lines", "Never skip it."].join(
+        "\n",
+      ),
+      "utf-8",
+    );
+
+    const storePath = path.join(rootDir, "sessions.json");
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      sessionFile: path.join(path.dirname(storePath), "session.jsonl"),
+      updatedAt: Date.now(),
+    };
+    const sessionStore: Record<string, SessionEntry> = {
+      main: sessionEntry,
+    };
+
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "final" }],
+      meta: {
+        agentMeta: {
+          sessionId: "session-rotated",
+          compactionCount: 1,
+          autoCompactionSummaries: ["## Decisions\nKeep going."],
+          lastCallUsage: { input: 10_000, output: 3_000, total: 13_000 },
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: vi.fn(async () => {}) },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionEntry,
+      sessionStore,
+      sessionKey: "main",
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+    });
+
+    const queued = createQueuedRun({
+      run: {
+        verboseLevel: "on",
+        workspaceDir,
+      },
+    });
+
+    const originalCwd = process.cwd();
+    process.chdir(otherDir);
+    try {
+      await runner(queued);
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    await vi.waitFor(() => {
+      const queuedSystemEvents = peekSystemEvents("main");
+      expect(queuedSystemEvents.some((event) => event.includes("Read FOLLOWUP WORKSPACE."))).toBe(
+        true,
+      );
+    });
+  });
+
   it("refreshes queued followup runs to the rotated transcript", async () => {
     const storePath = path.join(
       await fs.mkdtemp(path.join(tmpdir(), "openclaw-compaction-queue-")),
