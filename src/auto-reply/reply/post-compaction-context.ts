@@ -148,74 +148,99 @@ async function buildPostCompactionSkillExcerpts(params: {
   skillsSnapshot?: SkillSnapshot;
 }): Promise<string | null> {
   const { skillsSnapshot } = params;
-  if (
-    !params.details ||
-    typeof params.details !== "object" ||
-    !skillsSnapshot?.resolvedSkills?.length
-  ) {
+  if (!skillsSnapshot?.resolvedSkills?.length) {
     return null;
   }
 
-  const referencedPaths = new Set(
-    [
-      ...normalizeWorkspaceFileList((params.details as { modifiedFiles?: unknown }).modifiedFiles),
-      ...normalizeWorkspaceFileList((params.details as { readFiles?: unknown }).readFiles),
-    ].map((entry) =>
-      path.isAbsolute(entry) ? path.normalize(entry) : path.resolve(params.workspaceDir, entry),
-    ),
-  );
-  if (referencedPaths.size === 0) {
-    return null;
-  }
+  const referencedPaths =
+    params.details && typeof params.details === "object"
+      ? new Set(
+          [
+            ...normalizeWorkspaceFileList(
+              (params.details as { modifiedFiles?: unknown }).modifiedFiles,
+            ),
+            ...normalizeWorkspaceFileList((params.details as { readFiles?: unknown }).readFiles),
+          ].map((entry) =>
+            path.isAbsolute(entry)
+              ? path.normalize(entry)
+              : path.resolve(params.workspaceDir, entry),
+          ),
+        )
+      : new Set<string>();
 
   const blocks: string[] = [];
   const seenPaths = new Set<string>();
   let usedChars = 0;
-  for (const skill of skillsSnapshot.resolvedSkills) {
+  const tryAppendSkill = (options: {
+    skill: NonNullable<SkillSnapshot["resolvedSkills"]>[number];
+    allowWorkspaceLocal: boolean;
+  }): void => {
+    const { skill, allowWorkspaceLocal } = options;
     const skillPathRaw = skill.filePath?.trim();
     const skillName = skill.name?.trim();
     if (!skillPathRaw || !skillName) {
-      continue;
+      return;
     }
 
     const skillPath = path.normalize(skillPathRaw);
-    if (!referencedPaths.has(skillPath) || seenPaths.has(skillPath)) {
-      continue;
-    }
-    seenPaths.add(skillPath);
-
     const relativeToWorkspace = path.relative(params.workspaceDir, skillPath);
     const isInsideWorkspace =
       relativeToWorkspace !== "" &&
       !relativeToWorkspace.startsWith("..") &&
       !path.isAbsolute(relativeToWorkspace);
-    if (isInsideWorkspace) {
-      continue;
+    if (!allowWorkspaceLocal && isInsideWorkspace) {
+      return;
+    }
+    if (seenPaths.has(skillPath)) {
+      return;
     }
 
     let content: string;
     try {
       content = fs.readFileSync(skillPath, "utf-8");
     } catch {
-      continue;
+      return;
     }
     if (content.includes("\u0000")) {
-      continue;
+      return;
     }
 
     const excerpt = truncateSkillExcerpt(content);
     if (!excerpt) {
-      continue;
+      return;
     }
     const block = `<skill name="${skillName}" path="${skillPath}">\n${excerpt}\n</skill>`;
     const projectedChars = usedChars + block.length;
     if (projectedChars > MAX_SKILL_EXCERPTS_TOTAL_CHARS) {
-      break;
+      return;
     }
+    seenPaths.add(skillPath);
     blocks.push(block);
     usedChars = projectedChars;
+  };
+
+  for (const skill of skillsSnapshot.resolvedSkills) {
+    const skillPath = skill.filePath?.trim() ? path.normalize(skill.filePath.trim()) : undefined;
+    if (!skillPath || !referencedPaths.has(skillPath)) {
+      continue;
+    }
+    tryAppendSkill({ skill, allowWorkspaceLocal: false });
     if (blocks.length >= MAX_SKILL_EXCERPTS) {
       break;
+    }
+  }
+
+  if (blocks.length === 0) {
+    const activeSkillNames = new Set(skillsSnapshot.skills.map((skill) => skill.name.trim()));
+    for (const skill of skillsSnapshot.resolvedSkills) {
+      const skillName = skill.name?.trim();
+      if (!skillName || !activeSkillNames.has(skillName)) {
+        continue;
+      }
+      tryAppendSkill({ skill, allowWorkspaceLocal: true });
+      if (blocks.length >= MAX_SKILL_EXCERPTS) {
+        break;
+      }
     }
   }
 

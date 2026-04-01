@@ -111,6 +111,55 @@ describe("readPostCompactionContext", () => {
     }
   });
 
+  it("returns active skill excerpts from the snapshot even when compaction details do not reference the skill file", async () => {
+    const externalSkillsDir = fs.mkdtempSync("/tmp/openclaw-post-compact-active-skill-");
+    try {
+      const skillDir = path.join(externalSkillsDir, "hooks");
+      const skillPath = path.join(skillDir, "SKILL.md");
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        skillPath,
+        "---\nname: hooks\ndescription: Hook discipline\n---\n\n# hooks\nAlways verify before completion.\n",
+      );
+
+      const skillsSnapshot: SkillSnapshot = {
+        prompt: "hooks",
+        skills: [{ name: "hooks" }],
+        resolvedSkills: [
+          createCanonicalFixtureSkill({
+            name: "hooks",
+            description: "Hook discipline",
+            filePath: skillPath,
+            baseDir: skillDir,
+            source: "workspace",
+          }),
+        ],
+      };
+
+      const notesDir = path.join(tmpDir, "notes");
+      fs.mkdirSync(notesDir, { recursive: true });
+      fs.writeFileSync(path.join(notesDir, "resume.md"), "Resume from file-only refresh.\n");
+
+      const result = await readPostCompactionContext(
+        tmpDir,
+        undefined,
+        undefined,
+        {
+          readFiles: [path.join(notesDir, "resume.md")],
+        },
+        skillsSnapshot,
+      );
+
+      expect(result).not.toBeNull();
+      expect(result).toContain("Recent skill excerpts from before compaction");
+      expect(result).toContain(`path="${skillPath}"`);
+      expect(result).toContain('name="hooks"');
+      expect(result).toContain("Always verify before completion.");
+    } finally {
+      fs.rmSync(externalSkillsDir, { recursive: true, force: true });
+    }
+  });
+
   it("returns active subagent state when compaction happens while descendants are still pending", async () => {
     addSubagentRunForTests({
       runId: "run-subagent-active",
