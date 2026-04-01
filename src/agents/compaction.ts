@@ -458,13 +458,51 @@ function getCompactionErrorMessage(error: unknown): string | undefined {
   return typeof error === "string" ? error : undefined;
 }
 
-function truncateHeadForSummarizationRetry(messages: AgentMessage[]): AgentMessage[] | null {
+function parsePromptTooLongTokenCounts(rawMessage: string): {
+  actualTokens: number | undefined;
+  limitTokens: number | undefined;
+} {
+  const match = rawMessage.match(/prompt is too long[^0-9]*(\d+)\s*tokens?\s*>\s*(\d+)/iu);
+  return {
+    actualTokens: match ? Number.parseInt(match[1] ?? "", 10) : undefined,
+    limitTokens: match ? Number.parseInt(match[2] ?? "", 10) : undefined,
+  };
+}
+
+function getPromptTooLongTokenGap(errorMessage?: string): number | undefined {
+  if (!errorMessage) {
+    return undefined;
+  }
+  const { actualTokens, limitTokens } = parsePromptTooLongTokenCounts(errorMessage);
+  if (actualTokens === undefined || limitTokens === undefined) {
+    return undefined;
+  }
+  const gap = actualTokens - limitTokens;
+  return gap > 0 ? gap : undefined;
+}
+
+function truncateHeadForSummarizationRetry(
+  messages: AgentMessage[],
+  errorMessage?: string,
+): AgentMessage[] | null {
   const groups = groupMessagesByCompactionRound(messages);
   if (groups.length < 2) {
     return null;
   }
 
-  const dropCount = Math.max(1, Math.floor(groups.length * 0.2));
+  const tokenGap = getPromptTooLongTokenGap(errorMessage);
+  let dropCount = Math.max(1, Math.floor(groups.length * 0.2));
+  if (tokenGap !== undefined) {
+    let accumulatedTokens = 0;
+    dropCount = 0;
+    for (const group of groups) {
+      accumulatedTokens += estimateMessagesTokens(group);
+      dropCount++;
+      if (accumulatedTokens >= tokenGap) {
+        break;
+      }
+    }
+  }
   const kept = groups.slice(Math.min(dropCount, groups.length - 1)).flat();
   return kept.length > 0 ? kept : null;
 }
@@ -512,7 +550,7 @@ export async function summarizeWithFallback(params: {
 
         const truncated =
           ptlAttempts < MAX_SUMMARIZATION_PTL_RETRIES
-            ? truncateHeadForSummarizationRetry(messagesToSummarize)
+            ? truncateHeadForSummarizationRetry(messagesToSummarize, errorMessage)
             : null;
         if (!truncated) {
           throw fullError;
