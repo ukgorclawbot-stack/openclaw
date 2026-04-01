@@ -1,6 +1,11 @@
 import type { CliSessionBinding, SessionSystemPromptReport } from "../../config/sessions/types.js";
 import type { MessagingToolSend } from "../pi-embedded-messaging.js";
 
+export type EmbeddedCompactionWorkspaceDetails = {
+  readFiles?: string[];
+  modifiedFiles?: string[];
+};
+
 export type EmbeddedPiAgentMeta = {
   sessionId: string;
   provider: string;
@@ -8,6 +13,7 @@ export type EmbeddedPiAgentMeta = {
   cliSessionBinding?: CliSessionBinding;
   compactionCount?: number;
   autoCompactionSummaries?: string[];
+  autoCompactionDetails?: EmbeddedCompactionWorkspaceDetails[];
   promptTokens?: number;
   usage?: {
     input?: number;

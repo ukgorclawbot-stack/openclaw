@@ -882,6 +882,12 @@ describe("runReplyAgent auto-compaction token update", () => {
               "/tmp/session.jsonl",
             ].join("\n"),
           ],
+          autoCompactionDetails: [
+            {
+              readFiles: ["/repo/src/a.ts", "/repo/src/b.ts"],
+              modifiedFiles: ["/repo/src/c.ts"],
+            },
+          ],
         },
       },
     });
@@ -926,7 +932,9 @@ describe("runReplyAgent auto-compaction token update", () => {
         (event) =>
           event.includes("continued from a previous conversation") &&
           event.includes("do not acknowledge the summary") &&
-          event.includes("Finish the optimization."),
+          event.includes("Finish the optimization.") &&
+          event.includes("Read files: /repo/src/a.ts, /repo/src/b.ts") &&
+          event.includes("Modified files: /repo/src/c.ts"),
       ),
     ).toBe(true);
   });

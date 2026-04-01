@@ -399,6 +399,8 @@ export function createFollowupRunner(params: {
         const targetSessionKey = queued.run.sessionKey ?? sessionKey;
         const latestAutoCompactionSummary =
           runResult.meta?.agentMeta?.autoCompactionSummaries?.at(-1)?.trim() ?? "";
+        const latestAutoCompactionDetails =
+          runResult.meta?.agentMeta?.autoCompactionDetails?.at(-1);
         if (targetSessionKey && latestAutoCompactionSummary) {
           const transcriptPath = resolveSessionFilePath(
             refreshedSessionEntry?.sessionId ?? queued.run.sessionId,
@@ -412,6 +414,7 @@ export function createFollowupRunner(params: {
             buildCompactionContinuationMessage({
               summary: latestAutoCompactionSummary,
               transcriptPath,
+              workspaceDetails: latestAutoCompactionDetails,
               recentMessagesPreserved: true,
               suppressFollowUpQuestions: true,
             }),

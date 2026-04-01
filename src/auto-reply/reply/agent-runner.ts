@@ -755,6 +755,7 @@ export async function runReplyAgent(params: {
 
       const latestAutoCompactionSummary =
         runResult.meta?.agentMeta?.autoCompactionSummaries?.at(-1)?.trim() ?? "";
+      const latestAutoCompactionDetails = runResult.meta?.agentMeta?.autoCompactionDetails?.at(-1);
       if (sessionKey && latestAutoCompactionSummary) {
         const transcriptPath = resolveSessionFilePath(
           activeSessionEntry?.sessionId ?? followupRun.run.sessionId,
@@ -768,6 +769,7 @@ export async function runReplyAgent(params: {
           buildCompactionContinuationMessage({
             summary: latestAutoCompactionSummary,
             transcriptPath,
+            workspaceDetails: latestAutoCompactionDetails,
             recentMessagesPreserved: true,
             suppressFollowUpQuestions: true,
           }),

@@ -7,6 +7,7 @@ import type { ContextEngine } from "../../../context-engine/types.js";
 import type { PluginHookBeforeAgentStartResult } from "../../../plugins/types.js";
 import type { MessagingToolSend } from "../../pi-embedded-messaging.js";
 import type { NormalizedUsage } from "../../usage.js";
+import type { EmbeddedCompactionWorkspaceDetails } from "../types.js";
 import type { RunEmbeddedPiAgentParams } from "./params.js";
 
 type EmbeddedRunAttemptBase = Omit<
@@ -63,6 +64,7 @@ export type EmbeddedRunAttemptResult = {
   attemptUsage?: NormalizedUsage;
   compactionCount?: number;
   autoCompactionSummaries?: string[];
+  autoCompactionDetails?: EmbeddedCompactionWorkspaceDetails[];
   /** Client tool call detected (OpenResponses hosted tools). */
   clientToolCall?: { name: string; params: Record<string, unknown> };
   /** True when sessions_yield tool was called during this attempt. */

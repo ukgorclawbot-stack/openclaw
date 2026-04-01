@@ -90,7 +90,11 @@ import {
   sessionLikelyHasOversizedToolResults,
   truncateOversizedToolResultsInSession,
 } from "./tool-result-truncation.js";
-import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
+import type {
+  EmbeddedCompactionWorkspaceDetails,
+  EmbeddedPiAgentMeta,
+  EmbeddedPiRunResult,
+} from "./types.js";
 import { createUsageAccumulator, mergeUsageIntoAccumulator } from "./usage-accumulator.js";
 import { describeUnknownError } from "./utils.js";
 
@@ -102,6 +106,47 @@ function appendAutoCompactionSummary(target: string[], summary?: string): void {
     return;
   }
   target.push(trimmed);
+}
+
+function normalizeAutoCompactionDetails(
+  details: unknown,
+): EmbeddedCompactionWorkspaceDetails | undefined {
+  if (!details || typeof details !== "object") {
+    return undefined;
+  }
+
+  const normalizeList = (value: unknown): string[] | undefined => {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const normalized = Array.from(
+      new Set(
+        value
+          .filter((entry): entry is string => typeof entry === "string")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0),
+      ),
+    );
+    return normalized.length > 0 ? normalized : undefined;
+  };
+
+  const readFiles = normalizeList((details as { readFiles?: unknown }).readFiles);
+  const modifiedFiles = normalizeList((details as { modifiedFiles?: unknown }).modifiedFiles);
+  if (!readFiles && !modifiedFiles) {
+    return undefined;
+  }
+  return { readFiles, modifiedFiles };
+}
+
+function appendAutoCompactionDetails(
+  target: EmbeddedCompactionWorkspaceDetails[],
+  details: unknown,
+): void {
+  const normalized = normalizeAutoCompactionDetails(details);
+  if (!normalized) {
+    return;
+  }
+  target.push(normalized);
 }
 
 export async function runEmbeddedPiAgent(
@@ -325,6 +370,7 @@ export async function runEmbeddedPiAgent(
       let lastRunPromptUsage: ReturnType<typeof normalizeUsage> | undefined;
       let autoCompactionCount = 0;
       const autoCompactionSummaries: string[] = [];
+      const autoCompactionDetails: EmbeddedCompactionWorkspaceDetails[] = [];
       let runLoopIterations = 0;
       let overloadProfileRotations = 0;
       let timeoutCompactionAttempts = 0;
@@ -592,6 +638,9 @@ export async function runEmbeddedPiAgent(
           for (const summary of attempt.autoCompactionSummaries ?? []) {
             appendAutoCompactionSummary(autoCompactionSummaries, summary);
           }
+          for (const details of attempt.autoCompactionDetails ?? []) {
+            appendAutoCompactionDetails(autoCompactionDetails, details);
+          }
           const activeErrorContext = resolveActiveErrorContext({
             lastAssistant,
             provider,
@@ -724,6 +773,10 @@ export async function runEmbeddedPiAgent(
                 appendAutoCompactionSummary(
                   autoCompactionSummaries,
                   timeoutCompactResult.result?.summary,
+                );
+                appendAutoCompactionDetails(
+                  autoCompactionDetails,
+                  timeoutCompactResult.result?.details,
                 );
                 if (contextEngine.info.ownsCompaction === true) {
                   await runPostCompactionSideEffects({
@@ -883,6 +936,7 @@ export async function runEmbeddedPiAgent(
               if (compactResult.compacted) {
                 autoCompactionCount += 1;
                 appendAutoCompactionSummary(autoCompactionSummaries, compactResult.result?.summary);
+                appendAutoCompactionDetails(autoCompactionDetails, compactResult.result?.details);
                 log.info(`auto-compaction succeeded for ${provider}/${modelId}; retrying prompt`);
                 continue;
               }
@@ -1305,6 +1359,8 @@ export async function runEmbeddedPiAgent(
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
             autoCompactionSummaries:
               autoCompactionSummaries.length > 0 ? autoCompactionSummaries : undefined,
+            autoCompactionDetails:
+              autoCompactionDetails.length > 0 ? autoCompactionDetails : undefined,
           };
 
           const payloads = buildEmbeddedRunPayloads({

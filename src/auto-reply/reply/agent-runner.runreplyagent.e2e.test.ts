@@ -1831,6 +1831,10 @@ describe("runReplyAgent memory flush", () => {
           firstKeptEntryId: "first-kept",
           tokensBefore: 90_000,
           tokensAfter: 8_000,
+          details: {
+            readFiles: ["/repo/src/a.ts", "/repo/src/b.ts"],
+            modifiedFiles: ["/repo/src/c.ts"],
+          },
         },
       });
       const calls: Array<{ prompt?: string; extraSystemPrompt?: string }> = [];
@@ -1882,6 +1886,8 @@ describe("runReplyAgent memory flush", () => {
       );
       expect(calls[0]?.extraSystemPrompt).toContain("compacted");
       expect(calls[0]?.extraSystemPrompt).toContain(transcriptPath);
+      expect(calls[0]?.extraSystemPrompt).toContain("Read files: /repo/src/a.ts, /repo/src/b.ts");
+      expect(calls[0]?.extraSystemPrompt).toContain("Modified files: /repo/src/c.ts");
       expect(calls[0]?.extraSystemPrompt).toContain("Post-compaction context refresh");
       expect(calls[0]?.extraSystemPrompt).toContain("Read AGENTS.md before replying.");
       expect(

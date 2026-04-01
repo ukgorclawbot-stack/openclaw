@@ -35,6 +35,10 @@ describe("compaction-contract", () => {
     const message = buildCompactionContinuationMessage({
       summary: "## Decisions\nKeep going.",
       transcriptPath: "/tmp/session.jsonl",
+      workspaceDetails: {
+        readFiles: ["/repo/src/a.ts", "/repo/src/b.ts"],
+        modifiedFiles: ["/repo/src/c.ts"],
+      },
       recentMessagesPreserved: true,
       suppressFollowUpQuestions: true,
     });
@@ -43,6 +47,9 @@ describe("compaction-contract", () => {
     expect(message).toContain("## Decisions\nKeep going.");
     expect(message).toContain("/tmp/session.jsonl");
     expect(message).toContain("like exact code snippets, error messages, or content you generated");
+    expect(message).toContain("Recent workspace context before compaction:");
+    expect(message).toContain("Read files: /repo/src/a.ts, /repo/src/b.ts");
+    expect(message).toContain("Modified files: /repo/src/c.ts");
     expect(message).toContain("Recent messages are preserved verbatim.");
     expect(message).toContain("do not acknowledge the summary");
     expect(message).toContain("Resume directly");

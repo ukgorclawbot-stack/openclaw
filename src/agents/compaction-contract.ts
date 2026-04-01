@@ -2,6 +2,7 @@ import type { CompactionSummarizationInstructions } from "./compaction.js";
 import { wrapUntrustedPromptDataBlock } from "./sanitize-for-prompt.js";
 
 const MAX_UNTRUSTED_INSTRUCTION_CHARS = 4000;
+const MAX_CONTINUATION_FILES_PER_SECTION = 5;
 const STRICT_EXACT_IDENTIFIERS_INSTRUCTION =
   "For ## Exact identifiers, preserve literal values exactly as seen (IDs, URLs, file paths, ports, hashes, dates, times).";
 const POLICY_OFF_EXACT_IDENTIFIERS_INSTRUCTION =
@@ -19,6 +20,53 @@ export const REQUIRED_COMPACTION_SUMMARY_SECTIONS = [
   "## Pending user asks",
   "## Exact identifiers",
 ] as const;
+
+function normalizeContinuationFileList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  );
+}
+
+function formatContinuationFileSection(label: string, files: string[]): string | undefined {
+  if (files.length === 0) {
+    return undefined;
+  }
+
+  const visibleFiles = files.slice(0, MAX_CONTINUATION_FILES_PER_SECTION);
+  const omittedCount = files.length - visibleFiles.length;
+  const suffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
+  return `- ${label}: ${visibleFiles.join(", ")}${suffix}`;
+}
+
+function formatCompactionWorkspaceDetails(details: unknown): string | undefined {
+  if (!details || typeof details !== "object") {
+    return undefined;
+  }
+
+  const readFiles = normalizeContinuationFileList((details as { readFiles?: unknown }).readFiles);
+  const modifiedFiles = normalizeContinuationFileList(
+    (details as { modifiedFiles?: unknown }).modifiedFiles,
+  );
+  const lines = [
+    formatContinuationFileSection("Read files", readFiles),
+    formatContinuationFileSection("Modified files", modifiedFiles),
+  ].filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  return ["Recent workspace context before compaction:", ...lines].join("\n");
+}
 
 function wrapUntrustedInstructionBlock(label: string, text: string): string {
   return wrapUntrustedPromptDataBlock({
@@ -143,6 +191,7 @@ export function formatCompactionSummary(summary: string): string {
 export function buildCompactionContinuationMessage(params: {
   summary: string;
   transcriptPath?: string;
+  workspaceDetails?: unknown;
   recentMessagesPreserved?: boolean;
   suppressFollowUpQuestions?: boolean;
 }): string {
@@ -156,6 +205,11 @@ export function buildCompactionContinuationMessage(params: {
     message +=
       `\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: ` +
       params.transcriptPath;
+  }
+
+  const workspaceDetails = formatCompactionWorkspaceDetails(params.workspaceDetails);
+  if (workspaceDetails) {
+    message += `\n\n${workspaceDetails}`;
   }
 
   if (params.recentMessagesPreserved) {

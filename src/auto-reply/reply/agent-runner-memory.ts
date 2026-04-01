@@ -178,6 +178,7 @@ function appendExtraSystemPrompt(followupRun: FollowupRun, extraPrompt: string |
 function appendPostCompactionContinuationPrompt(params: {
   followupRun: FollowupRun;
   summary?: string;
+  details?: unknown;
   sessionId?: string;
   sessionEntry?: SessionEntry;
   sessionKey?: string;
@@ -201,6 +202,7 @@ function appendPostCompactionContinuationPrompt(params: {
     buildCompactionContinuationMessage({
       summary,
       transcriptPath,
+      workspaceDetails: params.details,
       recentMessagesPreserved: true,
       suppressFollowUpQuestions: true,
     }),
@@ -499,6 +501,7 @@ export async function runPreflightCompactionIfNeeded(params: {
   appendPostCompactionContinuationPrompt({
     followupRun: params.followupRun,
     summary: result.result?.summary,
+    details: result.result?.details,
     sessionId: entry.sessionId,
     sessionEntry: entry,
     sessionKey: params.sessionKey,
