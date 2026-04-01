@@ -164,6 +164,14 @@ export async function readPostCompactionContext(
 ): Promise<string | null> {
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
   const fileExcerpts = await buildPostCompactionFileExcerpts(workspaceDir, workspaceDetails);
+  const fallbackFromFileExcerpts = () =>
+    fileExcerpts
+      ? [
+          "[Post-compaction context refresh]",
+          fileExcerpts,
+          resolveCronStyleNow(cfg ?? {}, nowMs ?? Date.now()).timeLine,
+        ].join("\n\n")
+      : null;
 
   try {
     const opened = await openBoundaryFile({
@@ -172,7 +180,7 @@ export async function readPostCompactionContext(
       boundaryLabel: "workspace root",
     });
     if (!opened.ok) {
-      return null;
+      return fallbackFromFileExcerpts();
     }
     const content = (() => {
       try {
@@ -252,13 +260,7 @@ export async function readPostCompactionContext(
     segments.push(timeLine);
     return segments.join("\n\n");
   } catch {
-    return fileExcerpts
-      ? [
-          "[Post-compaction context refresh]",
-          fileExcerpts,
-          resolveCronStyleNow(cfg ?? {}, nowMs ?? Date.now()).timeLine,
-        ].join("\n\n")
-      : null;
+    return fallbackFromFileExcerpts();
   }
 }
 

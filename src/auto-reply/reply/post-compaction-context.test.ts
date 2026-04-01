@@ -42,6 +42,22 @@ describe("readPostCompactionContext", () => {
     expect(result).toBeNull();
   });
 
+  it("returns file excerpts when AGENTS.md is missing but compaction details include workspace files", async () => {
+    const notesDir = path.join(tmpDir, "notes");
+    fs.mkdirSync(notesDir, { recursive: true });
+    fs.writeFileSync(path.join(notesDir, "resume.md"), "Resume from file-only refresh.\n");
+
+    const result = await readPostCompactionContext(tmpDir, undefined, undefined, {
+      readFiles: [path.join(notesDir, "resume.md")],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("Recent file excerpts from before compaction");
+    expect(result).toContain('path="notes/resume.md"');
+    expect(result).toContain("Resume from file-only refresh.");
+    expect(result).toContain("Current time:");
+  });
+
   it("returns null when AGENTS.md has no relevant sections", async () => {
     fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), "# My Agent\n\nSome content.\n");
     const result = await readPostCompactionContext(tmpDir);
