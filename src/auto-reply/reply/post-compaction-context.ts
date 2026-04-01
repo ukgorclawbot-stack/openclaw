@@ -20,6 +20,7 @@ const MAX_SUBAGENT_STATE_CHARS = 1200;
 const MAX_SUBAGENT_SUMMARY_CHARS = 180;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
+const PLAN_PRIORITY_FILE_RE = /(?:^|[._-])(plan|todo|task|tasks|spec)(?:[._-]|$)/u;
 
 function buildPostCompactionRuntimeModeReminder(runtimeMode?: string): string | null {
   const normalized = runtimeMode?.trim().toLowerCase();
@@ -56,6 +57,21 @@ function truncateFileExcerpt(content: string): string {
   return `${trimmed.slice(0, MAX_FILE_EXCERPT_CHARS)}\n...[truncated]...`;
 }
 
+function prioritizePostCompactionFiles(candidates: string[], runtimeMode?: string): string[] {
+  if (runtimeMode?.trim().toLowerCase() !== "plan") {
+    return candidates;
+  }
+
+  return candidates
+    .map((candidate, index) => ({
+      candidate,
+      index,
+      priority: PLAN_PRIORITY_FILE_RE.test(path.basename(candidate).toLowerCase()) ? 0 : 1,
+    }))
+    .toSorted((left, right) => left.priority - right.priority || left.index - right.index)
+    .map((entry) => entry.candidate);
+}
+
 function truncateSkillExcerpt(content: string): string {
   const trimmed = content.trim();
   if (trimmed.length <= MAX_SKILL_EXCERPT_CHARS) {
@@ -75,6 +91,7 @@ function truncateSubagentSummary(content: string): string {
 async function buildPostCompactionFileExcerpts(
   workspaceDir: string,
   details: unknown,
+  runtimeMode?: string,
 ): Promise<string | null> {
   if (!details || typeof details !== "object") {
     return null;
@@ -84,7 +101,10 @@ async function buildPostCompactionFileExcerpts(
     (details as { modifiedFiles?: unknown }).modifiedFiles,
   );
   const readFiles = normalizeWorkspaceFileList((details as { readFiles?: unknown }).readFiles);
-  const candidates = Array.from(new Set([...modifiedFiles, ...readFiles]));
+  const candidates = prioritizePostCompactionFiles(
+    Array.from(new Set([...modifiedFiles, ...readFiles])),
+    runtimeMode,
+  );
   if (candidates.length === 0) {
     return null;
   }
@@ -358,7 +378,11 @@ export async function readPostCompactionContext(
   runtimeMode?: string,
 ): Promise<string | null> {
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
-  const fileExcerpts = await buildPostCompactionFileExcerpts(workspaceDir, workspaceDetails);
+  const fileExcerpts = await buildPostCompactionFileExcerpts(
+    workspaceDir,
+    workspaceDetails,
+    runtimeMode,
+  );
   const skillExcerpts = await buildPostCompactionSkillExcerpts({
     workspaceDir,
     details: workspaceDetails,

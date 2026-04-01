@@ -359,6 +359,39 @@ Read startup rules.
     expect(result).toContain("Phase 3 resume notes.");
   });
 
+  it("prioritizes plan files in file excerpts when ACP runtime mode is plan", async () => {
+    const docsDir = path.join(tmpDir, "docs");
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, "alpha.md"), "Alpha context.\n");
+    fs.writeFileSync(path.join(docsDir, "beta.md"), "Beta context.\n");
+    fs.writeFileSync(path.join(docsDir, "gamma.md"), "Gamma context.\n");
+    fs.writeFileSync(
+      path.join(docsDir, "plan.md"),
+      "Execution plan that must survive compaction.\n",
+    );
+
+    const result = await readPostCompactionContext(
+      tmpDir,
+      undefined,
+      undefined,
+      {
+        readFiles: [
+          path.join(docsDir, "alpha.md"),
+          path.join(docsDir, "beta.md"),
+          path.join(docsDir, "gamma.md"),
+          path.join(docsDir, "plan.md"),
+        ],
+      },
+      undefined,
+      undefined,
+      "plan",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain('path="docs/plan.md"');
+    expect(result).toContain("Execution plan that must survive compaction.");
+  });
+
   it("truncates when content exceeds limit", async () => {
     const longContent = "## Session Startup\n\n" + "A".repeat(4000) + "\n\n## Other\n\nStuff.";
     fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), longContent);
