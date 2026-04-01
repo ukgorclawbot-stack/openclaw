@@ -931,6 +931,80 @@ describe("runReplyAgent auto-compaction token update", () => {
     ).toBe(true);
   });
 
+  it("resolves continuation transcript paths from relative session files", async () => {
+    const tmp = await fs.mkdtemp(
+      path.join(os.tmpdir(), "openclaw-continuation-relative-transcript-"),
+    );
+    const storePath = path.join(tmp, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry = {
+      sessionId: "session",
+      sessionFile: "session.jsonl",
+      updatedAt: Date.now(),
+      totalTokens: 10_000,
+      compactionCount: 0,
+    };
+
+    await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+    runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "done" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 11_000, output: 500, total: 11_500 },
+          lastCallUsage: { input: 10_500, output: 500, total: 11_000 },
+          compactionCount: 1,
+          autoCompactionSummaries: ["## Decisions\nKeep going."],
+        },
+      },
+    });
+
+    const config = {
+      agents: { defaults: { compaction: { memoryFlush: { enabled: false } } } },
+    };
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath,
+      sessionEntry,
+      config,
+      sessionFile: "session.jsonl",
+      workspaceDir: tmp,
+    });
+
+    await runReplyAgent({
+      commandBody: "hello",
+      followupRun,
+      queueKey: "main",
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      typing,
+      sessionCtx,
+      sessionEntry,
+      sessionStore: { [sessionKey]: sessionEntry },
+      sessionKey,
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+      agentCfgContextTokens: 200_000,
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    const expectedTranscriptPath = await normalizeComparablePath(path.join(tmp, "session.jsonl"));
+    const queuedSystemEvents = peekSystemEvents(sessionKey);
+    expect(queuedSystemEvents.some((event) => event.includes(expectedTranscriptPath))).toBe(true);
+    expect(
+      queuedSystemEvents.some((event) =>
+        event.includes("read the full transcript at: session.jsonl"),
+      ),
+    ).toBe(false);
+  });
+
   it("reads post-compaction AGENTS context from the run workspace instead of process cwd", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-compaction-workspace-"));
     const workspaceDir = path.join(tmp, "workspace");

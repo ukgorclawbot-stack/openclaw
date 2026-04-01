@@ -756,10 +756,18 @@ export async function runReplyAgent(params: {
       const latestAutoCompactionSummary =
         runResult.meta?.agentMeta?.autoCompactionSummaries?.at(-1)?.trim() ?? "";
       if (sessionKey && latestAutoCompactionSummary) {
+        const transcriptPath = resolveSessionFilePath(
+          activeSessionEntry?.sessionId ?? followupRun.run.sessionId,
+          activeSessionEntry ?? { sessionFile: followupRun.run.sessionFile },
+          resolveSessionFilePathOptions({
+            agentId: followupRun.run.agentId || resolveAgentIdFromSessionKey(sessionKey),
+            storePath,
+          }),
+        );
         enqueueSystemEvent(
           buildCompactionContinuationMessage({
             summary: latestAutoCompactionSummary,
-            transcriptPath: activeSessionEntry?.sessionFile ?? followupRun.run.sessionFile,
+            transcriptPath,
             recentMessagesPreserved: true,
             suppressFollowUpQuestions: true,
           }),

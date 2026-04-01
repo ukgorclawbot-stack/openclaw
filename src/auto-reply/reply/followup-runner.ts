@@ -11,7 +11,11 @@ import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
-import type { SessionEntry } from "../../config/sessions.js";
+import {
+  resolveSessionFilePath,
+  resolveSessionFilePathOptions,
+  type SessionEntry,
+} from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
@@ -396,10 +400,18 @@ export function createFollowupRunner(params: {
         const latestAutoCompactionSummary =
           runResult.meta?.agentMeta?.autoCompactionSummaries?.at(-1)?.trim() ?? "";
         if (targetSessionKey && latestAutoCompactionSummary) {
+          const transcriptPath = resolveSessionFilePath(
+            refreshedSessionEntry?.sessionId ?? queued.run.sessionId,
+            refreshedSessionEntry ?? { sessionFile: queued.run.sessionFile },
+            resolveSessionFilePathOptions({
+              agentId: queued.run.agentId,
+              storePath,
+            }),
+          );
           enqueueSystemEvent(
             buildCompactionContinuationMessage({
               summary: latestAutoCompactionSummary,
-              transcriptPath: refreshedSessionEntry?.sessionFile ?? queued.run.sessionFile,
+              transcriptPath,
               recentMessagesPreserved: true,
               suppressFollowUpQuestions: true,
             }),
