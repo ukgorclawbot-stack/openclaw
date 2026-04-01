@@ -423,7 +423,12 @@ export function createFollowupRunner(params: {
         }
         if (targetSessionKey) {
           const workspaceDir = queued.run.workspaceDir;
-          readPostCompactionContext(workspaceDir, queued.run.config)
+          readPostCompactionContext(
+            workspaceDir,
+            queued.run.config,
+            undefined,
+            latestAutoCompactionDetails,
+          )
             .then((contextContent) => {
               if (contextContent) {
                 enqueueSystemEvent(contextContent, { sessionKey: targetSessionKey });

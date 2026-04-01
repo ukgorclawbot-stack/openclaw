@@ -568,6 +568,12 @@ describe("createFollowupRunner compaction", () => {
       ),
       "utf-8",
     );
+    await fs.mkdir(path.join(workspaceDir, "notes"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "notes", "followup.md"),
+      "Followup file refresher.\nContinue Phase 3.\n",
+      "utf-8",
+    );
 
     const storePath = path.join(rootDir, "sessions.json");
     const sessionEntry: SessionEntry = {
@@ -586,6 +592,11 @@ describe("createFollowupRunner compaction", () => {
           sessionId: "session-rotated",
           compactionCount: 1,
           autoCompactionSummaries: ["## Decisions\nKeep going."],
+          autoCompactionDetails: [
+            {
+              readFiles: [path.join(workspaceDir, "notes", "followup.md")],
+            },
+          ],
           lastCallUsage: { input: 10_000, output: 3_000, total: 13_000 },
         },
       },
@@ -623,6 +634,13 @@ describe("createFollowupRunner compaction", () => {
         expect(queuedSystemEvents.some((event) => event.includes("Read FOLLOWUP WORKSPACE."))).toBe(
           true,
         );
+        expect(
+          queuedSystemEvents.some(
+            (event) =>
+              event.includes('path="notes/followup.md"') &&
+              event.includes("Followup file refresher."),
+          ),
+        ).toBe(true);
       },
       { timeout: 20_000 },
     );
@@ -771,6 +789,12 @@ describe("createFollowupRunner compaction", () => {
       ].join("\n"),
       "utf-8",
     );
+    await fs.mkdir(path.join(workspaceDir, "notes"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "notes", "preflight.md"),
+      "Preflight file refresher.\nResume with the compacted workspace.\n",
+      "utf-8",
+    );
 
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -793,6 +817,9 @@ describe("createFollowupRunner compaction", () => {
         firstKeptEntryId: "first-kept",
         tokensBefore: 90_000,
         tokensAfter: 8_000,
+        details: {
+          readFiles: [path.join(workspaceDir, "notes", "preflight.md")],
+        },
       },
     });
 
@@ -836,6 +863,8 @@ describe("createFollowupRunner compaction", () => {
     expect(embeddedCalls[0]?.extraSystemPrompt).toContain(transcriptPath);
     expect(embeddedCalls[0]?.extraSystemPrompt).toContain("Post-compaction context refresh");
     expect(embeddedCalls[0]?.extraSystemPrompt).toContain("Read AGENTS.md before replying.");
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain('path="notes/preflight.md"');
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain("Preflight file refresher.");
     expect(
       (embeddedCalls[0]?.extraSystemPrompt ?? "").indexOf("continued from a previous conversation"),
     ).toBeLessThan(

@@ -6,8 +6,104 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { openBoundaryFile } from "../../infra/boundary-file-read.js";
 
 const MAX_CONTEXT_CHARS = 3000;
+const MAX_FILE_EXCERPTS = 3;
+const MAX_FILE_EXCERPT_CHARS = 600;
+const MAX_FILE_EXCERPTS_TOTAL_CHARS = 1800;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
+
+function normalizeWorkspaceFileList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  );
+}
+
+function truncateFileExcerpt(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= MAX_FILE_EXCERPT_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, MAX_FILE_EXCERPT_CHARS)}\n...[truncated]...`;
+}
+
+async function buildPostCompactionFileExcerpts(
+  workspaceDir: string,
+  details: unknown,
+): Promise<string | null> {
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+
+  const modifiedFiles = normalizeWorkspaceFileList(
+    (details as { modifiedFiles?: unknown }).modifiedFiles,
+  );
+  const readFiles = normalizeWorkspaceFileList((details as { readFiles?: unknown }).readFiles);
+  const candidates = Array.from(new Set([...modifiedFiles, ...readFiles]));
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const blocks: string[] = [];
+  let usedChars = 0;
+  for (const candidate of candidates) {
+    if (blocks.length >= MAX_FILE_EXCERPTS) {
+      break;
+    }
+
+    const absolutePath = path.isAbsolute(candidate)
+      ? candidate
+      : path.resolve(workspaceDir, candidate);
+    const opened = await openBoundaryFile({
+      absolutePath,
+      rootPath: workspaceDir,
+      boundaryLabel: "workspace root",
+      maxBytes: 128 * 1024,
+    });
+    if (!opened.ok) {
+      continue;
+    }
+
+    const content = (() => {
+      try {
+        return fs.readFileSync(opened.fd, "utf-8");
+      } finally {
+        fs.closeSync(opened.fd);
+      }
+    })();
+    if (content.includes("\u0000")) {
+      continue;
+    }
+
+    const excerpt = truncateFileExcerpt(content);
+    if (!excerpt) {
+      continue;
+    }
+    const relativePath =
+      path.relative(opened.rootRealPath, opened.path) || path.basename(opened.path);
+    const block = `<file path="${relativePath}">\n${excerpt}\n</file>`;
+    const projectedChars = usedChars + block.length;
+    if (projectedChars > MAX_FILE_EXCERPTS_TOTAL_CHARS) {
+      break;
+    }
+    blocks.push(block);
+    usedChars = projectedChars;
+  }
+
+  if (blocks.length === 0) {
+    return null;
+  }
+
+  return ["Recent file excerpts from before compaction:", ...blocks].join("\n\n");
+}
 
 // Compare configured section names as a case-insensitive set so deployments can
 // pin the documented defaults in any order without changing fallback semantics.
@@ -64,8 +160,10 @@ export async function readPostCompactionContext(
   workspaceDir: string,
   cfg?: OpenClawConfig,
   nowMs?: number,
+  workspaceDetails?: unknown,
 ): Promise<string | null> {
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
+  const fileExcerpts = await buildPostCompactionFileExcerpts(workspaceDir, workspaceDetails);
 
   try {
     const opened = await openBoundaryFile({
@@ -110,7 +208,7 @@ export async function readPostCompactionContext(
       sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS, foundSectionNames);
     }
 
-    if (sections.length === 0) {
+    if (sections.length === 0 && !fileExcerpts) {
       return null;
     }
 
@@ -144,13 +242,23 @@ export async function readPostCompactionContext(
       ? "Critical rules from AGENTS.md:"
       : `Injected sections from AGENTS.md (${displayNames.join(", ")}):`;
 
-    return (
-      "[Post-compaction context refresh]\n\n" +
-      `${prose}\n\n` +
-      `${sectionLabel}\n\n${safeContent}\n\n${timeLine}`
-    );
+    const segments = ["[Post-compaction context refresh]", prose];
+    if (safeContent.trim().length > 0) {
+      segments.push(`${sectionLabel}\n\n${safeContent}`);
+    }
+    if (fileExcerpts) {
+      segments.push(fileExcerpts.replaceAll("YYYY-MM-DD", dateStamp));
+    }
+    segments.push(timeLine);
+    return segments.join("\n\n");
   } catch {
-    return null;
+    return fileExcerpts
+      ? [
+          "[Post-compaction context refresh]",
+          fileExcerpts,
+          resolveCronStyleNow(cfg ?? {}, nowMs ?? Date.now()).timeLine,
+        ].join("\n\n")
+      : null;
   }
 }
 

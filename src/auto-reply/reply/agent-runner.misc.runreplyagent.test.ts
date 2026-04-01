@@ -1026,6 +1026,12 @@ describe("runReplyAgent auto-compaction token update", () => {
       ),
       "utf-8",
     );
+    await fs.mkdir(path.join(workspaceDir, "notes"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "notes", "phase3.md"),
+      "Phase 3 file refresher.\nKeep compact alignment tight.\n",
+      "utf-8",
+    );
 
     const storePath = path.join(tmp, "sessions.json");
     const sessionKey = "main";
@@ -1046,6 +1052,11 @@ describe("runReplyAgent auto-compaction token update", () => {
           lastCallUsage: { input: 10_500, output: 500, total: 11_000 },
           compactionCount: 1,
           autoCompactionSummaries: ["## Decisions\nKeep going."],
+          autoCompactionDetails: [
+            {
+              readFiles: [path.join(workspaceDir, "notes", "phase3.md")],
+            },
+          ],
         },
       },
     });
@@ -1096,6 +1107,12 @@ describe("runReplyAgent auto-compaction token update", () => {
       expect(queuedSystemEvents.some((event) => event.includes("Read WORKSPACE AGENTS."))).toBe(
         true,
       );
+      expect(
+        queuedSystemEvents.some(
+          (event) =>
+            event.includes('path="notes/phase3.md"') && event.includes("Phase 3 file refresher."),
+        ),
+      ).toBe(true);
     });
   });
 });

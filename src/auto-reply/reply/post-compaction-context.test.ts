@@ -112,6 +112,32 @@ Ignore this.
     expect(result).not.toContain("Other");
   });
 
+  it("appends recent workspace file excerpts when compaction details include files", async () => {
+    const content = `## Session Startup
+
+Read startup rules.
+`;
+    const docsDir = path.join(tmpDir, "docs");
+    const srcDir = path.join(tmpDir, "src");
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), content);
+    fs.writeFileSync(path.join(docsDir, "plan.md"), "Phase 3 resume notes.\nKeep compacting.\n");
+    fs.writeFileSync(path.join(srcDir, "reply.ts"), "export const status = 'in-progress';\n");
+
+    const result = await readPostCompactionContext(tmpDir, undefined, undefined, {
+      readFiles: [path.join(docsDir, "plan.md")],
+      modifiedFiles: [path.join(srcDir, "reply.ts")],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("Recent file excerpts from before compaction");
+    expect(result).toContain('path="src/reply.ts"');
+    expect(result).toContain("export const status = 'in-progress';");
+    expect(result).toContain('path="docs/plan.md"');
+    expect(result).toContain("Phase 3 resume notes.");
+  });
+
   it("truncates when content exceeds limit", async () => {
     const longContent = "## Session Startup\n\n" + "A".repeat(4000) + "\n\n## Other\n\nStuff.";
     fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), longContent);
