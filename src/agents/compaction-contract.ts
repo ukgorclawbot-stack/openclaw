@@ -154,7 +154,7 @@ export function buildCompactionContinuationMessage(params: {
 
   if (params.transcriptPath) {
     message +=
-      `\n\nIf you need specific details from before compaction, read the full transcript at: ` +
+      `\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: ` +
       params.transcriptPath;
   }
 

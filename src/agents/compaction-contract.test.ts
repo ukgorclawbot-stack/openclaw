@@ -42,6 +42,7 @@ describe("compaction-contract", () => {
     expect(message).toContain("continued from a previous conversation");
     expect(message).toContain("## Decisions\nKeep going.");
     expect(message).toContain("/tmp/session.jsonl");
+    expect(message).toContain("like exact code snippets, error messages, or content you generated");
     expect(message).toContain("Recent messages are preserved verbatim.");
     expect(message).toContain("do not acknowledge the summary");
     expect(message).toContain("Resume directly");
