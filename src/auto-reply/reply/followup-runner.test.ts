@@ -975,6 +975,104 @@ describe("createFollowupRunner compaction", () => {
     const store = loadSessionStore(storePath, { skipCache: true });
     expect(store.main?.compactionCount).toBe(1);
   });
+
+  it("re-announces ACP plan mode after preflight compaction", async () => {
+    const workspaceDir = await fs.mkdtemp(
+      path.join(tmpdir(), "openclaw-preflight-followup-plan-mode-"),
+    );
+    const storePath = path.join(workspaceDir, "sessions.json");
+    const transcriptPath = path.join(workspaceDir, "session.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        message: {
+          role: "user",
+          content: "x".repeat(320_000),
+          timestamp: Date.now(),
+        },
+      })}\n`,
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(workspaceDir, "AGENTS.md"),
+      ["## Session Startup", "Read AGENTS.md before replying."].join("\n"),
+      "utf-8",
+    );
+
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      sessionFile: transcriptPath,
+      totalTokens: 10,
+      totalTokensFresh: false,
+      compactionCount: 1,
+      acp: {
+        backend: "codex",
+        agent: "main",
+        runtimeSessionName: "main",
+        mode: "persistent",
+        state: "idle",
+        lastActivityAt: Date.now(),
+        runtimeOptions: {
+          runtimeMode: "plan",
+        },
+      },
+    };
+    const sessionStore: Record<string, SessionEntry> = {
+      main: sessionEntry,
+    };
+    await saveSessionStore(storePath, sessionStore);
+
+    compactEmbeddedPiSessionMock.mockResolvedValueOnce({
+      ok: true,
+      compacted: true,
+      result: {
+        summary: "compacted",
+        firstKeptEntryId: "first-kept",
+        tokensBefore: 90_000,
+        tokensAfter: 8_000,
+      },
+    });
+
+    const embeddedCalls: Array<{ extraSystemPrompt?: string }> = [];
+    runEmbeddedPiAgentMock.mockImplementationOnce(
+      async (params: { extraSystemPrompt?: string }) => {
+        embeddedCalls.push({ extraSystemPrompt: params.extraSystemPrompt });
+        return {
+          payloads: [{ text: "final" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      },
+    );
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: vi.fn(async () => {}) },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionEntry,
+      sessionStore,
+      sessionKey: "main",
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+      agentCfgContextTokens: 100_000,
+    });
+
+    const queued = createQueuedRun({
+      run: {
+        sessionFile: transcriptPath,
+        workspaceDir,
+      },
+    });
+
+    await runner(queued);
+
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain(
+      "ACP runtime mode before compaction: plan.",
+    );
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain(
+      "Continue operating in plan mode until the session runtime mode changes.",
+    );
+  });
 });
 
 describe("createFollowupRunner bootstrap warning dedupe", () => {

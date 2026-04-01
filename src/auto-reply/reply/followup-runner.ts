@@ -429,6 +429,9 @@ export function createFollowupRunner(params: {
             queued.run.skillsSnapshot ??
             refreshedSessionEntry?.skillsSnapshot ??
             activeSessionEntry?.skillsSnapshot;
+          const refreshRuntimeMode =
+            refreshedSessionEntry?.acp?.runtimeOptions?.runtimeMode ??
+            activeSessionEntry?.acp?.runtimeOptions?.runtimeMode;
           readPostCompactionContext(
             workspaceDir,
             queued.run.config,
@@ -436,6 +439,7 @@ export function createFollowupRunner(params: {
             latestAutoCompactionDetails,
             refreshSkillsSnapshot,
             targetSessionKey,
+            refreshRuntimeMode,
           )
             .then((contextContent) => {
               if (contextContent) {

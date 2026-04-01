@@ -214,6 +214,7 @@ async function appendPostCompactionRefreshPrompt(params: {
   followupRun: FollowupRun;
   details?: unknown;
   skillsSnapshot?: FollowupRun["run"]["skillsSnapshot"];
+  runtimeMode?: string;
 }): Promise<void> {
   const refreshPrompt = await readPostCompactionContext(
     params.followupRun.run.workspaceDir,
@@ -222,6 +223,7 @@ async function appendPostCompactionRefreshPrompt(params: {
     params.details,
     params.skillsSnapshot ?? params.followupRun.run.skillsSnapshot,
     params.followupRun.run.sessionKey,
+    params.runtimeMode,
   );
   if (!refreshPrompt) {
     return;
@@ -518,6 +520,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     followupRun: params.followupRun,
     details: result.result?.details,
     skillsSnapshot: entry.skillsSnapshot ?? params.followupRun.run.skillsSnapshot,
+    runtimeMode: entry.acp?.runtimeOptions?.runtimeMode,
   });
   entry = params.sessionStore?.[params.sessionKey] ?? entry;
   return entry ?? params.sessionEntry;

@@ -21,6 +21,18 @@ const MAX_SUBAGENT_SUMMARY_CHARS = 180;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
+function buildPostCompactionRuntimeModeReminder(runtimeMode?: string): string | null {
+  const normalized = runtimeMode?.trim().toLowerCase();
+  if (normalized !== "plan") {
+    return null;
+  }
+
+  return [
+    "ACP runtime mode before compaction: plan.",
+    "Continue operating in plan mode until the session runtime mode changes.",
+  ].join("\n");
+}
+
 function normalizeWorkspaceFileList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -318,6 +330,7 @@ export async function readPostCompactionContext(
   workspaceDetails?: unknown,
   skillsSnapshot?: SkillSnapshot,
   sessionKey?: string,
+  runtimeMode?: string,
 ): Promise<string | null> {
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
   const fileExcerpts = await buildPostCompactionFileExcerpts(workspaceDir, workspaceDetails);
@@ -327,11 +340,14 @@ export async function readPostCompactionContext(
     skillsSnapshot,
   });
   const subagentState = buildPostCompactionSubagentState(sessionKey);
+  const runtimeModeReminder = buildPostCompactionRuntimeModeReminder(runtimeMode);
   const fallbackFromFileExcerpts = () =>
-    fileExcerpts || skillExcerpts || subagentState
+    fileExcerpts || skillExcerpts || subagentState || runtimeModeReminder
       ? [
           "[Post-compaction context refresh]",
-          [fileExcerpts, skillExcerpts, subagentState].filter(Boolean).join("\n\n"),
+          [fileExcerpts, skillExcerpts, subagentState, runtimeModeReminder]
+            .filter(Boolean)
+            .join("\n\n"),
           resolveCronStyleNow(cfg ?? {}, nowMs ?? Date.now()).timeLine,
         ].join("\n\n")
       : null;
@@ -379,7 +395,13 @@ export async function readPostCompactionContext(
       sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS, foundSectionNames);
     }
 
-    if (sections.length === 0 && !fileExcerpts && !skillExcerpts && !subagentState) {
+    if (
+      sections.length === 0 &&
+      !fileExcerpts &&
+      !skillExcerpts &&
+      !subagentState &&
+      !runtimeModeReminder
+    ) {
       return null;
     }
 
@@ -425,6 +447,9 @@ export async function readPostCompactionContext(
     }
     if (subagentState) {
       segments.push(subagentState.replaceAll("YYYY-MM-DD", dateStamp));
+    }
+    if (runtimeModeReminder) {
+      segments.push(runtimeModeReminder);
     }
     segments.push(timeLine);
     return segments.join("\n\n");

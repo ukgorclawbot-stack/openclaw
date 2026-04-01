@@ -782,6 +782,7 @@ export async function runReplyAgent(params: {
         const workspaceDir = followupRun.run.workspaceDir;
         const refreshSkillsSnapshot =
           followupRun.run.skillsSnapshot ?? activeSessionEntry?.skillsSnapshot;
+        const refreshRuntimeMode = activeSessionEntry?.acp?.runtimeOptions?.runtimeMode;
         readPostCompactionContext(
           workspaceDir,
           cfg,
@@ -789,6 +790,7 @@ export async function runReplyAgent(params: {
           latestAutoCompactionDetails,
           refreshSkillsSnapshot,
           sessionKey,
+          refreshRuntimeMode,
         )
           .then((contextContent) => {
             if (contextContent) {
