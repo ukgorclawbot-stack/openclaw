@@ -19,6 +19,7 @@ export const SAFETY_MARGIN = 1.2; // 20% buffer for estimateTokens() inaccuracy
 const DEFAULT_SUMMARY_FALLBACK = "No prior history.";
 const DEFAULT_PARTS = 2;
 const MAX_SUMMARIZATION_PTL_RETRIES = 3;
+const COMPACTION_RETRY_BOOTSTRAP_TEXT = "(compaction retry bootstrap)";
 const MERGE_SUMMARIES_INSTRUCTIONS = [
   "Merge these partial summaries into a single cohesive summary.",
   "",
@@ -485,7 +486,12 @@ function truncateHeadForSummarizationRetry(
   messages: AgentMessage[],
   errorMessage?: string,
 ): AgentMessage[] | null {
-  const groups = groupMessagesByCompactionRound(messages);
+  const first = messages[0] as { role?: unknown; content?: unknown } | undefined;
+  const input =
+    first?.role === "user" && first.content === COMPACTION_RETRY_BOOTSTRAP_TEXT
+      ? messages.slice(1)
+      : messages;
+  const groups = groupMessagesByCompactionRound(input);
   if (groups.length < 2) {
     return null;
   }
@@ -504,7 +510,20 @@ function truncateHeadForSummarizationRetry(
     }
   }
   const kept = groups.slice(Math.min(dropCount, groups.length - 1)).flat();
-  return kept.length > 0 ? kept : null;
+  if (kept.length === 0) {
+    return null;
+  }
+  if (kept[0]?.role === "user") {
+    return kept;
+  }
+  return [
+    {
+      role: "user",
+      content: COMPACTION_RETRY_BOOTSTRAP_TEXT,
+      timestamp: Date.now(),
+    } as AgentMessage,
+    ...kept,
+  ];
 }
 
 /**

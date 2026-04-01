@@ -91,7 +91,11 @@ describe("compaction prompt-too-long retry", () => {
 
     const calls = piCodingAgentMocks.generateSummary.mock.calls as Array<[AgentMessage[]]>;
     expect(calls[0]?.[0].map((message) => message.timestamp)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(calls[1]?.[0].map((message) => message.timestamp)).toEqual([4, 5, 6]);
+    expect(calls[1]?.[0][0]).toMatchObject({
+      role: "user",
+      content: "(compaction retry bootstrap)",
+    });
+    expect(calls[1]?.[0].slice(1).map((message) => message.timestamp)).toEqual([4, 5, 6]);
   });
 
   it("drops enough oldest rounds to cover the parsed prompt-too-long token gap", async () => {
@@ -154,6 +158,10 @@ describe("compaction prompt-too-long retry", () => {
 
     const calls = piCodingAgentMocks.generateSummary.mock.calls as Array<[AgentMessage[]]>;
     expect(calls[0]?.[0].map((message) => message.timestamp)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    expect(calls[1]?.[0].map((message) => message.timestamp)).toEqual([7, 8, 9]);
+    expect(calls[1]?.[0][0]).toMatchObject({
+      role: "user",
+      content: "(compaction retry bootstrap)",
+    });
+    expect(calls[1]?.[0].slice(1).map((message) => message.timestamp)).toEqual([7, 8, 9]);
   });
 });
