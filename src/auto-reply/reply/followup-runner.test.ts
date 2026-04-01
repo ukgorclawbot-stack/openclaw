@@ -1451,4 +1451,48 @@ describe("createFollowupRunner agentDir forwarding", () => {
     const call = runEmbeddedPiAgentMock.mock.calls.at(-1)?.[0] as { agentDir?: string };
     expect(call?.agentDir).toBe(agentDir);
   });
+
+  it("inherits session entry skills snapshot when queued followup run omits it", async () => {
+    runEmbeddedPiAgentMock.mockClear();
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      messagingToolSentTexts: ["different message"],
+      meta: {},
+    });
+    const skillsSnapshot = {
+      prompt: "Reuse loaded skills",
+      skills: [
+        {
+          name: "hooks",
+          path: "/repo/.openclaw/workspace/skills/hooks/SKILL.md",
+        },
+      ],
+    };
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      skillsSnapshot,
+    };
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: vi.fn(async () => {}) },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionEntry,
+      defaultModel: "anthropic/claude-opus-4-5",
+    });
+
+    await runner(
+      createQueuedRun({
+        run: {
+          skillsSnapshot: undefined,
+        },
+      }),
+    );
+
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
+    const call = runEmbeddedPiAgentMock.mock.calls.at(-1)?.[0] as {
+      skillsSnapshot?: typeof skillsSnapshot;
+    };
+    expect(call?.skillsSnapshot).toEqual(skillsSnapshot);
+  });
 });

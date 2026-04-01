@@ -179,6 +179,8 @@ export function createFollowupRunner(params: {
         activeSessionEntry?.systemPromptReport,
       );
       try {
+        const resolvedSkillsSnapshot =
+          queued.run.skillsSnapshot ?? activeSessionEntry?.skillsSnapshot;
         const fallbackResult = await runWithModelFallback({
           cfg: queued.run.config,
           provider: queued.run.provider,
@@ -222,7 +224,7 @@ export function createFollowupRunner(params: {
                 agentDir: queued.run.agentDir,
                 workspaceDir: queued.run.workspaceDir,
                 config: queued.run.config,
-                skillsSnapshot: queued.run.skillsSnapshot,
+                skillsSnapshot: resolvedSkillsSnapshot,
                 prompt: queued.prompt,
                 persistedUserMessage: queued.run.persistedUserMessage,
                 extraSystemPrompt: queued.run.extraSystemPrompt,
