@@ -176,6 +176,44 @@ describe("readPostCompactionContext", () => {
     expect(result).toContain("Found two follow-up fixes");
   });
 
+  it("includes pending subagent attachment directories when a child kept artifacts", async () => {
+    const attachmentsDir = path.join(tmpDir, "subagent-artifacts", "reviewer");
+    fs.mkdirSync(attachmentsDir, { recursive: true });
+
+    addSubagentRunForTests({
+      runId: "run-subagent-artifacts",
+      childSessionKey: "agent:main:main:subagent:reviewer",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "review compact output",
+      label: "reviewer",
+      cleanup: "keep",
+      createdAt: 1,
+      startedAt: 2,
+      endedAt: 3,
+      cleanupHandled: false,
+      attachmentsDir,
+      frozenResultText: "Saved the audit notes for follow-up.",
+      outcome: {
+        status: "ok",
+      },
+    });
+
+    const result = await readPostCompactionContext(
+      tmpDir,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "agent:main:main",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("done pending delivery");
+    expect(result).toContain("reviewer");
+    expect(result).toContain(`attachments=${attachmentsDir}`);
+  });
+
   it("returns null when AGENTS.md has no relevant sections", async () => {
     fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), "# My Agent\n\nSome content.\n");
     const result = await readPostCompactionContext(tmpDir);

@@ -240,11 +240,14 @@ function buildPostCompactionSubagentState(sessionKey?: string): string | null {
     const frozenSummary = entry.frozenResultText?.trim()
       ? ` summary=${truncateSubagentSummary(entry.frozenResultText)}`
       : "";
+    const attachmentsSuffix = entry.attachmentsDir?.trim()
+      ? ` attachments=${entry.attachmentsDir.trim()}`
+      : "";
     const errorSuffix =
       entry.outcome?.status === "error" && entry.outcome.error?.trim()
         ? ` error=${entry.outcome.error.trim()}`
         : "";
-    const suffix = `${frozenSummary}${errorSuffix}`;
+    const suffix = `${frozenSummary}${attachmentsSuffix}${errorSuffix}`;
     const line = `${baseLine}${suffix}`;
     if (usedChars + 1 + line.length > MAX_SUBAGENT_STATE_CHARS) {
       break;
