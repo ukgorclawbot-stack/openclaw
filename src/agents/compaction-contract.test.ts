@@ -45,6 +45,9 @@ describe("compaction-contract", () => {
     expect(message).toContain("Recent messages are preserved verbatim.");
     expect(message).toContain("do not acknowledge the summary");
     expect(message).toContain("Resume directly");
+    expect(message).toContain("do not recap what was happening");
+    expect(message).toContain('do not preface with "I\'ll continue"');
+    expect(message).toContain("Pick up the last task as if the break never happened.");
   });
 
   it("strips analysis scratchpads and unwraps summary tags before continuation", () => {

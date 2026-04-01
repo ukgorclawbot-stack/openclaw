@@ -165,7 +165,9 @@ export function buildCompactionContinuationMessage(params: {
   if (params.suppressFollowUpQuestions) {
     message +=
       "\n\nContinue the conversation from where it left off without asking the user any further questions. " +
-      "Resume directly, do not acknowledge the summary, and do not ask the user to repeat context unless it is truly missing.";
+      "Resume directly, do not acknowledge the summary, do not recap what was happening, " +
+      'do not preface with "I\'ll continue" or similar, and do not ask the user to repeat context unless it is truly missing. ' +
+      "Pick up the last task as if the break never happened.";
   }
 
   return message;
