@@ -142,6 +142,40 @@ describe("readPostCompactionContext", () => {
     expect(result).toContain("run-suba");
   });
 
+  it("includes pending subagent result summaries when a child finished before compaction", async () => {
+    addSubagentRunForTests({
+      runId: "run-subagent-done",
+      childSessionKey: "agent:main:main:subagent:reviewer",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "review compact output",
+      label: "reviewer",
+      cleanup: "keep",
+      createdAt: 1,
+      startedAt: 2,
+      endedAt: 3,
+      cleanupHandled: false,
+      frozenResultText: "Found two follow-up fixes and saved the failing line numbers.",
+      outcome: {
+        status: "ok",
+      },
+    });
+
+    const result = await readPostCompactionContext(
+      tmpDir,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "agent:main:main",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("done pending delivery");
+    expect(result).toContain("reviewer");
+    expect(result).toContain("Found two follow-up fixes");
+  });
+
   it("returns null when AGENTS.md has no relevant sections", async () => {
     fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), "# My Agent\n\nSome content.\n");
     const result = await readPostCompactionContext(tmpDir);

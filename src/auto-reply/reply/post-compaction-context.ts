@@ -17,6 +17,7 @@ const MAX_SKILL_EXCERPT_CHARS = 600;
 const MAX_SKILL_EXCERPTS_TOTAL_CHARS = 1200;
 const MAX_SUBAGENT_STATE_ENTRIES = 4;
 const MAX_SUBAGENT_STATE_CHARS = 1200;
+const MAX_SUBAGENT_SUMMARY_CHARS = 180;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
@@ -49,6 +50,14 @@ function truncateSkillExcerpt(content: string): string {
     return trimmed;
   }
   return `${trimmed.slice(0, MAX_SKILL_EXCERPT_CHARS)}\n...[truncated]...`;
+}
+
+function truncateSubagentSummary(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= MAX_SUBAGENT_SUMMARY_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, MAX_SUBAGENT_SUMMARY_CHARS)}...[truncated]`;
 }
 
 async function buildPostCompactionFileExcerpts(
@@ -228,10 +237,14 @@ function buildPostCompactionSubagentState(sessionKey?: string): string | null {
     const status =
       typeof entry.endedAt !== "number" ? "running" : `${formatRunStatus(entry)} pending delivery`;
     const baseLine = `- ${status}: ${formatRunLabel(entry, { maxLength: 48 })} (session ${entry.childSessionKey}, run ${entry.runId.slice(0, 8)})`;
-    const suffix =
+    const frozenSummary = entry.frozenResultText?.trim()
+      ? ` summary=${truncateSubagentSummary(entry.frozenResultText)}`
+      : "";
+    const errorSuffix =
       entry.outcome?.status === "error" && entry.outcome.error?.trim()
         ? ` error=${entry.outcome.error.trim()}`
         : "";
+    const suffix = `${frozenSummary}${errorSuffix}`;
     const line = `${baseLine}${suffix}`;
     if (usedChars + 1 + line.length > MAX_SUBAGENT_STATE_CHARS) {
       break;
