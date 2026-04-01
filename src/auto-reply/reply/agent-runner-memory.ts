@@ -213,12 +213,14 @@ async function appendPostCompactionRefreshPrompt(params: {
   cfg: OpenClawConfig;
   followupRun: FollowupRun;
   details?: unknown;
+  skillsSnapshot?: FollowupRun["run"]["skillsSnapshot"];
 }): Promise<void> {
   const refreshPrompt = await readPostCompactionContext(
     params.followupRun.run.workspaceDir,
     params.cfg,
     undefined,
     params.details,
+    params.skillsSnapshot ?? params.followupRun.run.skillsSnapshot,
   );
   if (!refreshPrompt) {
     return;
@@ -514,6 +516,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     cfg: params.cfg,
     followupRun: params.followupRun,
     details: result.result?.details,
+    skillsSnapshot: entry.skillsSnapshot ?? params.followupRun.run.skillsSnapshot,
   });
   entry = params.sessionStore?.[params.sessionKey] ?? entry;
   return entry ?? params.sessionEntry;

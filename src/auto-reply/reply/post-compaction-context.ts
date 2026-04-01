@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveCronStyleNow } from "../../agents/current-time.js";
 import { resolveUserTimezone } from "../../agents/date-time.js";
+import type { SkillSnapshot } from "../../agents/skills.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { openBoundaryFile } from "../../infra/boundary-file-read.js";
 
@@ -9,6 +10,9 @@ const MAX_CONTEXT_CHARS = 3000;
 const MAX_FILE_EXCERPTS = 3;
 const MAX_FILE_EXCERPT_CHARS = 600;
 const MAX_FILE_EXCERPTS_TOTAL_CHARS = 1800;
+const MAX_SKILL_EXCERPTS = 2;
+const MAX_SKILL_EXCERPT_CHARS = 600;
+const MAX_SKILL_EXCERPTS_TOTAL_CHARS = 1200;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
@@ -33,6 +37,14 @@ function truncateFileExcerpt(content: string): string {
     return trimmed;
   }
   return `${trimmed.slice(0, MAX_FILE_EXCERPT_CHARS)}\n...[truncated]...`;
+}
+
+function truncateSkillExcerpt(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= MAX_SKILL_EXCERPT_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, MAX_SKILL_EXCERPT_CHARS)}\n...[truncated]...`;
 }
 
 async function buildPostCompactionFileExcerpts(
@@ -105,6 +117,90 @@ async function buildPostCompactionFileExcerpts(
   return ["Recent file excerpts from before compaction:", ...blocks].join("\n\n");
 }
 
+async function buildPostCompactionSkillExcerpts(params: {
+  workspaceDir: string;
+  details: unknown;
+  skillsSnapshot?: SkillSnapshot;
+}): Promise<string | null> {
+  const { skillsSnapshot } = params;
+  if (
+    !params.details ||
+    typeof params.details !== "object" ||
+    !skillsSnapshot?.resolvedSkills?.length
+  ) {
+    return null;
+  }
+
+  const referencedPaths = new Set(
+    [
+      ...normalizeWorkspaceFileList((params.details as { modifiedFiles?: unknown }).modifiedFiles),
+      ...normalizeWorkspaceFileList((params.details as { readFiles?: unknown }).readFiles),
+    ].map((entry) =>
+      path.isAbsolute(entry) ? path.normalize(entry) : path.resolve(params.workspaceDir, entry),
+    ),
+  );
+  if (referencedPaths.size === 0) {
+    return null;
+  }
+
+  const blocks: string[] = [];
+  const seenPaths = new Set<string>();
+  let usedChars = 0;
+  for (const skill of skillsSnapshot.resolvedSkills) {
+    const skillPathRaw = skill.filePath?.trim();
+    const skillName = skill.name?.trim();
+    if (!skillPathRaw || !skillName) {
+      continue;
+    }
+
+    const skillPath = path.normalize(skillPathRaw);
+    if (!referencedPaths.has(skillPath) || seenPaths.has(skillPath)) {
+      continue;
+    }
+    seenPaths.add(skillPath);
+
+    const relativeToWorkspace = path.relative(params.workspaceDir, skillPath);
+    const isInsideWorkspace =
+      relativeToWorkspace !== "" &&
+      !relativeToWorkspace.startsWith("..") &&
+      !path.isAbsolute(relativeToWorkspace);
+    if (isInsideWorkspace) {
+      continue;
+    }
+
+    let content: string;
+    try {
+      content = fs.readFileSync(skillPath, "utf-8");
+    } catch {
+      continue;
+    }
+    if (content.includes("\u0000")) {
+      continue;
+    }
+
+    const excerpt = truncateSkillExcerpt(content);
+    if (!excerpt) {
+      continue;
+    }
+    const block = `<skill name="${skillName}" path="${skillPath}">\n${excerpt}\n</skill>`;
+    const projectedChars = usedChars + block.length;
+    if (projectedChars > MAX_SKILL_EXCERPTS_TOTAL_CHARS) {
+      break;
+    }
+    blocks.push(block);
+    usedChars = projectedChars;
+    if (blocks.length >= MAX_SKILL_EXCERPTS) {
+      break;
+    }
+  }
+
+  if (blocks.length === 0) {
+    return null;
+  }
+
+  return ["Recent skill excerpts from before compaction:", ...blocks].join("\n\n");
+}
+
 // Compare configured section names as a case-insensitive set so deployments can
 // pin the documented defaults in any order without changing fallback semantics.
 function matchesSectionSet(sectionNames: string[], expectedSections: string[]): boolean {
@@ -161,14 +257,20 @@ export async function readPostCompactionContext(
   cfg?: OpenClawConfig,
   nowMs?: number,
   workspaceDetails?: unknown,
+  skillsSnapshot?: SkillSnapshot,
 ): Promise<string | null> {
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
   const fileExcerpts = await buildPostCompactionFileExcerpts(workspaceDir, workspaceDetails);
+  const skillExcerpts = await buildPostCompactionSkillExcerpts({
+    workspaceDir,
+    details: workspaceDetails,
+    skillsSnapshot,
+  });
   const fallbackFromFileExcerpts = () =>
-    fileExcerpts
+    fileExcerpts || skillExcerpts
       ? [
           "[Post-compaction context refresh]",
-          fileExcerpts,
+          [fileExcerpts, skillExcerpts].filter(Boolean).join("\n\n"),
           resolveCronStyleNow(cfg ?? {}, nowMs ?? Date.now()).timeLine,
         ].join("\n\n")
       : null;
@@ -216,7 +318,7 @@ export async function readPostCompactionContext(
       sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS, foundSectionNames);
     }
 
-    if (sections.length === 0 && !fileExcerpts) {
+    if (sections.length === 0 && !fileExcerpts && !skillExcerpts) {
       return null;
     }
 
@@ -256,6 +358,9 @@ export async function readPostCompactionContext(
     }
     if (fileExcerpts) {
       segments.push(fileExcerpts.replaceAll("YYYY-MM-DD", dateStamp));
+    }
+    if (skillExcerpts) {
+      segments.push(skillExcerpts.replaceAll("YYYY-MM-DD", dateStamp));
     }
     segments.push(timeLine);
     return segments.join("\n\n");

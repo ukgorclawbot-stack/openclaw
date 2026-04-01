@@ -425,11 +425,16 @@ export function createFollowupRunner(params: {
         }
         if (targetSessionKey) {
           const workspaceDir = queued.run.workspaceDir;
+          const refreshSkillsSnapshot =
+            queued.run.skillsSnapshot ??
+            refreshedSessionEntry?.skillsSnapshot ??
+            activeSessionEntry?.skillsSnapshot;
           readPostCompactionContext(
             workspaceDir,
             queued.run.config,
             undefined,
             latestAutoCompactionDetails,
+            refreshSkillsSnapshot,
           )
             .then((contextContent) => {
               if (contextContent) {

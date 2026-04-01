@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { type SkillSnapshot } from "../../agents/skills.js";
+import { createCanonicalFixtureSkill } from "../../agents/skills.test-helpers.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { readPostCompactionContext } from "./post-compaction-context.js";
 
@@ -56,6 +58,52 @@ describe("readPostCompactionContext", () => {
     expect(result).toContain('path="notes/resume.md"');
     expect(result).toContain("Resume from file-only refresh.");
     expect(result).toContain("Current time:");
+  });
+
+  it("returns invoked skill excerpts for compaction details that reference skill files outside the workspace", async () => {
+    const externalSkillsDir = fs.mkdtempSync("/tmp/openclaw-post-compact-skill-");
+    try {
+      const skillDir = path.join(externalSkillsDir, "hooks");
+      const skillPath = path.join(skillDir, "SKILL.md");
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        skillPath,
+        "---\nname: hooks\ndescription: Hook discipline\n---\n\n# hooks\nAlways verify before completion.\n",
+      );
+
+      const skillsSnapshot: SkillSnapshot = {
+        prompt: "hooks",
+        skills: [{ name: "hooks" }],
+        resolvedSkills: [
+          createCanonicalFixtureSkill({
+            name: "hooks",
+            description: "Hook discipline",
+            filePath: skillPath,
+            baseDir: skillDir,
+            source: "workspace",
+          }),
+        ],
+      };
+
+      const result = await readPostCompactionContext(
+        tmpDir,
+        undefined,
+        undefined,
+        {
+          readFiles: [skillPath],
+        },
+        skillsSnapshot,
+      );
+
+      expect(result).not.toBeNull();
+      expect(result).toContain("Recent skill excerpts from before compaction");
+      expect(result).toContain(`path="${skillPath}"`);
+      expect(result).toContain('name="hooks"');
+      expect(result).toContain("Always verify before completion.");
+      expect(result).toContain("Current time:");
+    } finally {
+      fs.rmSync(externalSkillsDir, { recursive: true, force: true });
+    }
   });
 
   it("returns null when AGENTS.md has no relevant sections", async () => {
