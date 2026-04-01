@@ -22,6 +22,19 @@ const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 const PLAN_PRIORITY_FILE_RE = /(?:^|[._-])(plan|todo|task|tasks|spec)(?:[._-]|$)/u;
 
+function resolveSkillExcerptPriority(params: { isActive: boolean; isReferenced: boolean }): number {
+  if (params.isActive && params.isReferenced) {
+    return 0;
+  }
+  if (params.isActive) {
+    return 1;
+  }
+  if (params.isReferenced) {
+    return 2;
+  }
+  return 3;
+}
+
 function buildPostCompactionRuntimeModeReminder(runtimeMode?: string): string | null {
   const normalized = runtimeMode?.trim().toLowerCase();
   if (normalized !== "plan") {
@@ -191,6 +204,7 @@ async function buildPostCompactionSkillExcerpts(params: {
   const blocks: string[] = [];
   const seenPaths = new Set<string>();
   let usedChars = 0;
+  const activeSkillNames = new Set(skillsSnapshot.skills.map((skill) => skill.name.trim()));
   const tryAppendSkill = (options: {
     skill: NonNullable<SkillSnapshot["resolvedSkills"]>[number];
     allowWorkspaceLocal: boolean;
@@ -239,28 +253,33 @@ async function buildPostCompactionSkillExcerpts(params: {
     usedChars = projectedChars;
   };
 
-  for (const skill of skillsSnapshot.resolvedSkills) {
-    const skillPath = skill.filePath?.trim() ? path.normalize(skill.filePath.trim()) : undefined;
-    if (!skillPath || !referencedPaths.has(skillPath)) {
-      continue;
-    }
-    tryAppendSkill({ skill, allowWorkspaceLocal: false });
+  const orderedSkills = skillsSnapshot.resolvedSkills
+    .map((skill, index) => {
+      const skillName = skill.name?.trim();
+      const skillPath = skill.filePath?.trim() ? path.normalize(skill.filePath.trim()) : undefined;
+      const isActive = Boolean(skillName && activeSkillNames.has(skillName));
+      const isReferenced = Boolean(skillPath && referencedPaths.has(skillPath));
+      return {
+        skill,
+        index,
+        isActive,
+        isReferenced,
+      };
+    })
+    .filter((entry) => entry.isActive || entry.isReferenced)
+    .toSorted(
+      (left, right) =>
+        resolveSkillExcerptPriority(left) - resolveSkillExcerptPriority(right) ||
+        left.index - right.index,
+    );
+
+  for (const entry of orderedSkills) {
+    tryAppendSkill({
+      skill: entry.skill,
+      allowWorkspaceLocal: entry.isActive,
+    });
     if (blocks.length >= MAX_SKILL_EXCERPTS) {
       break;
-    }
-  }
-
-  if (blocks.length === 0) {
-    const activeSkillNames = new Set(skillsSnapshot.skills.map((skill) => skill.name.trim()));
-    for (const skill of skillsSnapshot.resolvedSkills) {
-      const skillName = skill.name?.trim();
-      if (!skillName || !activeSkillNames.has(skillName)) {
-        continue;
-      }
-      tryAppendSkill({ skill, allowWorkspaceLocal: true });
-      if (blocks.length >= MAX_SKILL_EXCERPTS) {
-        break;
-      }
     }
   }
 

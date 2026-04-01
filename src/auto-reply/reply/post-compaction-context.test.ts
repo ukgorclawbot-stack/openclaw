@@ -160,6 +160,71 @@ describe("readPostCompactionContext", () => {
     }
   });
 
+  it("prioritizes active skills ahead of non-active referenced skills", async () => {
+    const externalSkillsDir = fs.mkdtempSync("/tmp/openclaw-post-compact-skill-priority-");
+    try {
+      const writeSkill = (name: string, body: string) => {
+        const skillDir = path.join(externalSkillsDir, name);
+        const skillPath = path.join(skillDir, "SKILL.md");
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(
+          skillPath,
+          `---\nname: ${name}\ndescription: ${name} discipline\n---\n\n# ${name}\n${body}\n`,
+        );
+        return { skillDir, skillPath };
+      };
+
+      const inactiveOne = writeSkill("inactive-one", "Inactive skill one.");
+      const inactiveTwo = writeSkill("inactive-two", "Inactive skill two.");
+      const active = writeSkill("hooks", "Always verify before completion.");
+
+      const skillsSnapshot: SkillSnapshot = {
+        prompt: "hooks",
+        skills: [{ name: "hooks" }],
+        resolvedSkills: [
+          createCanonicalFixtureSkill({
+            name: "inactive-one",
+            description: "inactive-one discipline",
+            filePath: inactiveOne.skillPath,
+            baseDir: inactiveOne.skillDir,
+            source: "workspace",
+          }),
+          createCanonicalFixtureSkill({
+            name: "inactive-two",
+            description: "inactive-two discipline",
+            filePath: inactiveTwo.skillPath,
+            baseDir: inactiveTwo.skillDir,
+            source: "workspace",
+          }),
+          createCanonicalFixtureSkill({
+            name: "hooks",
+            description: "Hook discipline",
+            filePath: active.skillPath,
+            baseDir: active.skillDir,
+            source: "workspace",
+          }),
+        ],
+      };
+
+      const result = await readPostCompactionContext(
+        tmpDir,
+        undefined,
+        undefined,
+        {
+          readFiles: [inactiveOne.skillPath, inactiveTwo.skillPath],
+        },
+        skillsSnapshot,
+      );
+
+      expect(result).not.toBeNull();
+      expect(result).toContain(`path="${active.skillPath}"`);
+      expect(result).toContain("Always verify before completion.");
+      expect(result).not.toContain(`path="${inactiveTwo.skillPath}"`);
+    } finally {
+      fs.rmSync(externalSkillsDir, { recursive: true, force: true });
+    }
+  });
+
   it("returns active subagent state when compaction happens while descendants are still pending", async () => {
     addSubagentRunForTests({
       runId: "run-subagent-active",
