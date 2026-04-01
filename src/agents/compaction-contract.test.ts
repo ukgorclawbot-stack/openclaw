@@ -3,6 +3,7 @@ import {
   buildCompactionContinuationMessage,
   buildCompactionStructureInstructions,
   buildStructuredFallbackSummary,
+  formatCompactionSummary,
 } from "./compaction-contract.js";
 
 describe("compaction-contract", () => {
@@ -44,5 +45,22 @@ describe("compaction-contract", () => {
     expect(message).toContain("Recent messages are preserved verbatim.");
     expect(message).toContain("do not acknowledge the summary");
     expect(message).toContain("Resume directly");
+  });
+
+  it("strips analysis scratchpads and unwraps summary tags before continuation", () => {
+    const formatted = formatCompactionSummary(
+      [
+        "<analysis>",
+        "draft notes",
+        "</analysis>",
+        "",
+        "<summary>",
+        "## Decisions",
+        "Keep going.",
+        "</summary>",
+      ].join("\n"),
+    );
+
+    expect(formatted).toBe("Summary:\n## Decisions\nKeep going.");
   });
 });

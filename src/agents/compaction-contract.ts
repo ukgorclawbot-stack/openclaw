@@ -121,13 +121,32 @@ export function buildStructuredFallbackSummary(
   ].join("\n");
 }
 
+export function formatCompactionSummary(summary: string): string {
+  let formattedSummary = summary;
+
+  formattedSummary = formattedSummary.replace(/<analysis>[\s\S]*?<\/analysis>/u, "");
+
+  const summaryMatch = formattedSummary.match(/<summary>([\s\S]*?)<\/summary>/u);
+  if (summaryMatch) {
+    const content = summaryMatch[1] || "";
+    formattedSummary = formattedSummary.replace(
+      /<summary>[\s\S]*?<\/summary>/u,
+      `Summary:\n${content.trim()}`,
+    );
+  }
+
+  formattedSummary = formattedSummary.replace(/\n\n+/gu, "\n\n");
+
+  return formattedSummary.trim();
+}
+
 export function buildCompactionContinuationMessage(params: {
   summary: string;
   transcriptPath?: string;
   recentMessagesPreserved?: boolean;
   suppressFollowUpQuestions?: boolean;
 }): string {
-  const formattedSummary = params.summary.trim();
+  const formattedSummary = formatCompactionSummary(params.summary);
   let message =
     "This session is being continued from a previous conversation that ran out of context. " +
     "The summary below covers the earlier portion of the conversation.\n\n" +
