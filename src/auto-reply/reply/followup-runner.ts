@@ -5,6 +5,7 @@ import {
 } from "openclaw/plugin-sdk/reply-payload";
 import { resolveRunModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
+import { buildCompactionContinuationMessage } from "../../agents/compaction-contract.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
@@ -14,6 +15,7 @@ import type { SessionEntry } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
+import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
@@ -27,6 +29,7 @@ import {
   resolveOriginMessageProvider,
   resolveOriginMessageTo,
 } from "./origin-routing.js";
+import { readPostCompactionContext } from "./post-compaction-context.js";
 import { refreshQueuedFollowupSession, type FollowupRun } from "./queue.js";
 import {
   applyReplyThreading,
@@ -388,6 +391,32 @@ export function createFollowupRunner(params: {
               nextSessionFile: refreshedSessionEntry.sessionFile,
             });
           }
+        }
+        const targetSessionKey = queued.run.sessionKey ?? sessionKey;
+        const latestAutoCompactionSummary =
+          runResult.meta?.agentMeta?.autoCompactionSummaries?.at(-1)?.trim() ?? "";
+        if (targetSessionKey && latestAutoCompactionSummary) {
+          enqueueSystemEvent(
+            buildCompactionContinuationMessage({
+              summary: latestAutoCompactionSummary,
+              transcriptPath: refreshedSessionEntry?.sessionFile ?? queued.run.sessionFile,
+              recentMessagesPreserved: true,
+              suppressFollowUpQuestions: true,
+            }),
+            { sessionKey: targetSessionKey },
+          );
+        }
+        if (targetSessionKey) {
+          const workspaceDir = process.cwd();
+          readPostCompactionContext(workspaceDir, queued.run.config)
+            .then((contextContent) => {
+              if (contextContent) {
+                enqueueSystemEvent(contextContent, { sessionKey: targetSessionKey });
+              }
+            })
+            .catch(() => {
+              // Silent failure — post-compaction context is best-effort
+            });
         }
         if (queued.run.verboseLevel && queued.run.verboseLevel !== "off") {
           const suffix = typeof count === "number" ? ` (count ${count})` : "";

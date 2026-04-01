@@ -1,4 +1,5 @@
 import { extractKeywords, isQueryStopWordToken } from "../../plugin-sdk/memory-core-host-query.js";
+import { REQUIRED_COMPACTION_SUMMARY_SECTIONS } from "../compaction-contract.js";
 import type { CompactionSummarizationInstructions } from "../compaction.js";
 import { wrapUntrustedPromptDataBlock } from "../sanitize-for-prompt.js";
 
@@ -6,17 +7,7 @@ const MAX_EXTRACTED_IDENTIFIERS = 12;
 const MAX_UNTRUSTED_INSTRUCTION_CHARS = 4000;
 const MAX_ASK_OVERLAP_TOKENS = 12;
 const MIN_ASK_OVERLAP_TOKENS_FOR_DOUBLE_MATCH = 3;
-const REQUIRED_SUMMARY_SECTIONS = [
-  "## Decisions",
-  "## Open TODOs",
-  "## Constraints/Rules",
-  "## Pending user asks",
-  "## Exact identifiers",
-] as const;
-const STRICT_EXACT_IDENTIFIERS_INSTRUCTION =
-  "For ## Exact identifiers, preserve literal values exactly as seen (IDs, URLs, file paths, ports, hashes, dates, times).";
-const POLICY_OFF_EXACT_IDENTIFIERS_INSTRUCTION =
-  "For ## Exact identifiers, include identifiers only when needed for continuity; do not enforce literal-preservation rules.";
+const REQUIRED_SUMMARY_SECTIONS = REQUIRED_COMPACTION_SUMMARY_SECTIONS;
 
 export function wrapUntrustedInstructionBlock(label: string, text: string): string {
   return wrapUntrustedPromptDataBlock({
@@ -26,96 +17,11 @@ export function wrapUntrustedInstructionBlock(label: string, text: string): stri
   });
 }
 
-function resolveExactIdentifierSectionInstruction(
-  summarizationInstructions?: CompactionSummarizationInstructions,
-): string {
-  const policy = summarizationInstructions?.identifierPolicy ?? "strict";
-  if (policy === "off") {
-    return POLICY_OFF_EXACT_IDENTIFIERS_INSTRUCTION;
-  }
-  if (policy === "custom") {
-    const custom = summarizationInstructions?.identifierInstructions?.trim();
-    if (custom) {
-      const customBlock = wrapUntrustedInstructionBlock(
-        "For ## Exact identifiers, apply this operator-defined policy text",
-        custom,
-      );
-      if (customBlock) {
-        return customBlock;
-      }
-    }
-  }
-  return STRICT_EXACT_IDENTIFIERS_INSTRUCTION;
-}
-
-export function buildCompactionStructureInstructions(
-  customInstructions?: string,
-  summarizationInstructions?: CompactionSummarizationInstructions,
-): string {
-  const identifierSectionInstruction =
-    resolveExactIdentifierSectionInstruction(summarizationInstructions);
-  const sectionsTemplate = [
-    "Produce a compact, factual summary with these exact section headings:",
-    ...REQUIRED_SUMMARY_SECTIONS,
-    identifierSectionInstruction,
-    "Do not omit unresolved asks from the user.",
-  ].join("\n");
-  const custom = customInstructions?.trim();
-  if (!custom) {
-    return sectionsTemplate;
-  }
-  const customBlock = wrapUntrustedInstructionBlock("Additional context from /compact", custom);
-  if (!customBlock) {
-    return sectionsTemplate;
-  }
-  return `${sectionsTemplate}\n\n${customBlock}`;
-}
-
 function normalizedSummaryLines(summary: string): string[] {
   return summary
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-}
-
-function hasRequiredSummarySections(summary: string): boolean {
-  const lines = normalizedSummaryLines(summary);
-  let cursor = 0;
-  for (const heading of REQUIRED_SUMMARY_SECTIONS) {
-    const index = lines.findIndex((line, lineIndex) => lineIndex >= cursor && line === heading);
-    if (index < 0) {
-      return false;
-    }
-    cursor = index + 1;
-  }
-  return true;
-}
-
-export function buildStructuredFallbackSummary(
-  previousSummary: string | undefined,
-  _summarizationInstructions?: CompactionSummarizationInstructions,
-): string {
-  const trimmedPreviousSummary = previousSummary?.trim() ?? "";
-  if (trimmedPreviousSummary && hasRequiredSummarySections(trimmedPreviousSummary)) {
-    return trimmedPreviousSummary;
-  }
-  const exactIdentifiersSummary = "None captured.";
-  return [
-    "## Decisions",
-    trimmedPreviousSummary || "No prior history.",
-    "",
-    "## Open TODOs",
-    "None.",
-    "",
-    "## Constraints/Rules",
-    "None.",
-    "",
-    "## Pending user asks",
-    "None.",
-    "",
-    "## Exact identifiers",
-    exactIdentifiersSummary,
-  ].join("\n");
 }
 
 export function appendSummarySection(summary: string, section: string): string {

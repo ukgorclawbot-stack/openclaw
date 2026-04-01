@@ -106,6 +106,29 @@ describe("timeout-triggered compaction", () => {
     expect(result.meta.error).toBeUndefined();
   });
 
+  it("records timeout recovery summaries in agent metadata", async () => {
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        timedOut: true,
+        lastAssistant: {
+          usage: { input: 160000 },
+        } as never,
+      }),
+    );
+    mockedCompactDirect.mockResolvedValueOnce(
+      makeCompactionSuccess({
+        summary: "timeout recovery compaction",
+        tokensBefore: 160000,
+        tokensAfter: 60000,
+      }),
+    );
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({ promptError: null }));
+
+    const result = await runEmbeddedPiAgent(overflowBaseRunParams);
+
+    expect(result.meta.agentMeta?.autoCompactionSummaries).toEqual(["timeout recovery compaction"]);
+  });
+
   it("passes channel, thread, message, and sender context into timeout compaction", async () => {
     mockedRunEmbeddedAttempt.mockResolvedValueOnce(
       makeAttemptResult({

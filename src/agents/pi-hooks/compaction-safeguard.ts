@@ -6,6 +6,10 @@ import { extractSections } from "../../auto-reply/reply/post-compaction-context.
 import { openBoundaryFile } from "../../infra/boundary-file-read.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
+  buildCompactionStructureInstructions,
+  buildStructuredFallbackSummary,
+} from "../compaction-contract.js";
+import {
   hasMeaningfulConversationContent,
   isRealConversationMessage,
 } from "../compaction-real-conversation.js";
@@ -31,8 +35,6 @@ import {
 import {
   appendSummarySection,
   auditSummaryQuality,
-  buildCompactionStructureInstructions,
-  buildStructuredFallbackSummary,
   extractOpaqueIdentifiers,
   wrapUntrustedInstructionBlock,
 } from "./compaction-safeguard-quality.js";

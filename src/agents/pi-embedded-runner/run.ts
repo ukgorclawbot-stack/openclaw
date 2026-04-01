@@ -96,6 +96,14 @@ import { describeUnknownError } from "./utils.js";
 
 type ApiKeyInfo = ResolvedProviderAuth;
 
+function appendAutoCompactionSummary(target: string[], summary?: string): void {
+  const trimmed = summary?.trim();
+  if (!trimmed) {
+    return;
+  }
+  target.push(trimmed);
+}
+
 export async function runEmbeddedPiAgent(
   params: RunEmbeddedPiAgentParams,
 ): Promise<EmbeddedPiRunResult> {
@@ -316,6 +324,7 @@ export async function runEmbeddedPiAgent(
       const usageAccumulator = createUsageAccumulator();
       let lastRunPromptUsage: ReturnType<typeof normalizeUsage> | undefined;
       let autoCompactionCount = 0;
+      const autoCompactionSummaries: string[] = [];
       let runLoopIterations = 0;
       let overloadProfileRotations = 0;
       let timeoutCompactionAttempts = 0;
@@ -580,6 +589,9 @@ export async function runEmbeddedPiAgent(
           lastTurnTotal = lastAssistantUsage?.total ?? attemptUsage?.total;
           const attemptCompactionCount = Math.max(0, attempt.compactionCount ?? 0);
           autoCompactionCount += attemptCompactionCount;
+          for (const summary of attempt.autoCompactionSummaries ?? []) {
+            appendAutoCompactionSummary(autoCompactionSummaries, summary);
+          }
           const activeErrorContext = resolveActiveErrorContext({
             lastAssistant,
             provider,
@@ -709,6 +721,10 @@ export async function runEmbeddedPiAgent(
               await runOwnsCompactionAfterHook("timeout recovery", timeoutCompactResult);
               if (timeoutCompactResult.compacted) {
                 autoCompactionCount += 1;
+                appendAutoCompactionSummary(
+                  autoCompactionSummaries,
+                  timeoutCompactResult.result?.summary,
+                );
                 if (contextEngine.info.ownsCompaction === true) {
                   await runPostCompactionSideEffects({
                     config: params.config,
@@ -866,6 +882,7 @@ export async function runEmbeddedPiAgent(
               await runOwnsCompactionAfterHook("overflow recovery", compactResult);
               if (compactResult.compacted) {
                 autoCompactionCount += 1;
+                appendAutoCompactionSummary(autoCompactionSummaries, compactResult.result?.summary);
                 log.info(`auto-compaction succeeded for ${provider}/${modelId}; retrying prompt`);
                 continue;
               }
@@ -1286,6 +1303,8 @@ export async function runEmbeddedPiAgent(
             lastCallUsage: usageMeta.lastCallUsage,
             promptTokens: usageMeta.promptTokens,
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
+            autoCompactionSummaries:
+              autoCompactionSummaries.length > 0 ? autoCompactionSummaries : undefined,
           };
 
           const payloads = buildEmbeddedRunPayloads({

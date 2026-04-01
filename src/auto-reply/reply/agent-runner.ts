@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { buildCompactionContinuationMessage } from "../../agents/compaction-contract.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
@@ -750,6 +751,20 @@ export async function runReplyAgent(params: {
           nextSessionId: refreshedSessionEntry.sessionId,
           nextSessionFile: refreshedSessionEntry.sessionFile,
         });
+      }
+
+      const latestAutoCompactionSummary =
+        runResult.meta?.agentMeta?.autoCompactionSummaries?.at(-1)?.trim() ?? "";
+      if (sessionKey && latestAutoCompactionSummary) {
+        enqueueSystemEvent(
+          buildCompactionContinuationMessage({
+            summary: latestAutoCompactionSummary,
+            transcriptPath: activeSessionEntry?.sessionFile ?? followupRun.run.sessionFile,
+            recentMessagesPreserved: true,
+            suppressFollowUpQuestions: true,
+          }),
+          { sessionKey },
+        );
       }
 
       // Inject post-compaction workspace context for the next agent turn

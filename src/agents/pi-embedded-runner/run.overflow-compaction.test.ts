@@ -150,6 +150,27 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
     expect(result.meta.error).toBeUndefined();
   });
 
+  it("records overflow recovery summaries in agent metadata", async () => {
+    const overflowError = makeOverflowError();
+
+    mockedRunEmbeddedAttempt
+      .mockResolvedValueOnce(makeAttemptResult({ promptError: overflowError }))
+      .mockResolvedValueOnce(makeAttemptResult({ promptError: null }));
+    mockedCompactDirect.mockResolvedValueOnce(
+      makeCompactionSuccess({
+        summary: "overflow recovery compaction",
+        firstKeptEntryId: "entry-8",
+        tokensBefore: 160000,
+      }),
+    );
+
+    const result = await runEmbeddedPiAgent(overflowBaseRunParams);
+
+    expect(result.meta.agentMeta?.autoCompactionSummaries).toEqual([
+      "overflow recovery compaction",
+    ]);
+  });
+
   it("does not reset compaction attempt budget after successful tool-result truncation", async () => {
     const overflowError = queueOverflowAttemptWithOversizedToolOutput(
       mockedRunEmbeddedAttempt,

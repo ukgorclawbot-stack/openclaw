@@ -843,6 +843,93 @@ describe("runReplyAgent auto-compaction token update", () => {
     expect(queuedSystemEvents.some((event) => event.includes("Post-Compaction Audit"))).toBe(false);
     expect(queuedSystemEvents.some((event) => event.includes("WORKFLOW_AUTO.md"))).toBe(false);
   });
+
+  it("enqueues a Claude-style continuation message after auto-compaction", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-continuation-event-"));
+    const storePath = path.join(tmp, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 10_000,
+      compactionCount: 0,
+    };
+
+    await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+    runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "done" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 11_000, output: 500, total: 11_500 },
+          lastCallUsage: { input: 10_500, output: 500, total: 11_000 },
+          compactionCount: 1,
+          autoCompactionSummaries: [
+            [
+              "## Decisions",
+              "Keep going.",
+              "",
+              "## Open TODOs",
+              "None.",
+              "",
+              "## Constraints/Rules",
+              "None.",
+              "",
+              "## Pending user asks",
+              "Finish the optimization.",
+              "",
+              "## Exact identifiers",
+              "/tmp/session.jsonl",
+            ].join("\n"),
+          ],
+        },
+      },
+    });
+
+    const config = {
+      agents: { defaults: { compaction: { memoryFlush: { enabled: false } } } },
+    };
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath,
+      sessionEntry,
+      config,
+    });
+
+    await runReplyAgent({
+      commandBody: "hello",
+      followupRun,
+      queueKey: "main",
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      typing,
+      sessionCtx,
+      sessionEntry,
+      sessionStore: { [sessionKey]: sessionEntry },
+      sessionKey,
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+      agentCfgContextTokens: 200_000,
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    const queuedSystemEvents = peekSystemEvents(sessionKey);
+    expect(
+      queuedSystemEvents.some(
+        (event) =>
+          event.includes("continued from a previous conversation") &&
+          event.includes("do not acknowledge the summary") &&
+          event.includes("Finish the optimization."),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("runReplyAgent block streaming", () => {

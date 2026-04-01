@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../../config/sessions/types.js";
+import { peekSystemEvents, resetSystemEventsForTest } from "../../infra/system-events.js";
 import type { FollowupRun, QueueSettings } from "./queue.js";
 
 const runEmbeddedPiAgentMock = vi.fn();
@@ -254,11 +255,13 @@ beforeEach(async () => {
   );
   clearFollowupQueue("main");
   FOLLOWUP_TEST_QUEUES.clear();
+  resetSystemEventsForTest();
 });
 
 afterEach(async () => {
   clearFollowupQueue("main");
   FOLLOWUP_TEST_QUEUES.clear();
+  resetSystemEventsForTest();
   vi.clearAllTimers();
   vi.useRealTimers();
   const { clearSessionStoreCacheForTest } = await import("../../config/sessions/store.js");
@@ -412,6 +415,79 @@ describe("createFollowupRunner compaction", () => {
     expect(await normalizeComparablePath(sessionStore.main.sessionFile ?? "")).toBe(
       await normalizeComparablePath(path.join(path.dirname(storePath), "session-rotated.jsonl")),
     );
+  });
+
+  it("enqueues a Claude-style continuation message after followup auto-compaction", async () => {
+    const storePath = path.join(
+      await fs.mkdtemp(path.join(tmpdir(), "openclaw-followup-continuation-")),
+      "sessions.json",
+    );
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      sessionFile: path.join(path.dirname(storePath), "session.jsonl"),
+      updatedAt: Date.now(),
+    };
+    const sessionStore: Record<string, SessionEntry> = {
+      main: sessionEntry,
+    };
+
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "final" }],
+      meta: {
+        agentMeta: {
+          sessionId: "session-rotated",
+          compactionCount: 1,
+          autoCompactionSummaries: [
+            [
+              "## Decisions",
+              "Keep going.",
+              "",
+              "## Open TODOs",
+              "None.",
+              "",
+              "## Constraints/Rules",
+              "None.",
+              "",
+              "## Pending user asks",
+              "Finish the optimization.",
+              "",
+              "## Exact identifiers",
+              "/tmp/session.jsonl",
+            ].join("\n"),
+          ],
+          lastCallUsage: { input: 10_000, output: 3_000, total: 13_000 },
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: vi.fn(async () => {}) },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionEntry,
+      sessionStore,
+      sessionKey: "main",
+      storePath,
+      defaultModel: "anthropic/claude-opus-4-5",
+    });
+
+    const queued = createQueuedRun({
+      run: {
+        verboseLevel: "on",
+      },
+    });
+
+    await runner(queued);
+
+    const queuedSystemEvents = peekSystemEvents("main");
+    expect(
+      queuedSystemEvents.some(
+        (event) =>
+          event.includes("continued from a previous conversation") &&
+          event.includes("do not acknowledge the summary") &&
+          event.includes("Finish the optimization."),
+      ),
+    ).toBe(true);
   });
 
   it("refreshes queued followup runs to the rotated transcript", async () => {
