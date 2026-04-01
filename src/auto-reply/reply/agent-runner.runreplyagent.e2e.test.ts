@@ -1877,8 +1877,18 @@ describe("runReplyAgent memory flush", () => {
         await normalizeComparablePath(transcriptPath),
       );
       expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+      expect(calls[0]?.extraSystemPrompt).toContain(
+        "This session is being continued from a previous conversation that ran out of context.",
+      );
+      expect(calls[0]?.extraSystemPrompt).toContain("compacted");
+      expect(calls[0]?.extraSystemPrompt).toContain(transcriptPath);
       expect(calls[0]?.extraSystemPrompt).toContain("Post-compaction context refresh");
       expect(calls[0]?.extraSystemPrompt).toContain("Read AGENTS.md before replying.");
+      expect(
+        (calls[0]?.extraSystemPrompt ?? "").indexOf("continued from a previous conversation"),
+      ).toBeLessThan(
+        (calls[0]?.extraSystemPrompt ?? "").indexOf("Post-compaction context refresh"),
+      );
 
       const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
       expect(stored[sessionKey].compactionCount).toBe(2);

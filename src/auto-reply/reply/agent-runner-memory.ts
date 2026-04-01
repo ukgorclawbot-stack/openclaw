@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
+import { buildCompactionContinuationMessage } from "../../agents/compaction-contract.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
@@ -160,6 +161,52 @@ type SessionLogSnapshot = {
   usage?: SessionTranscriptUsageSnapshot;
 };
 
+function appendExtraSystemPrompt(followupRun: FollowupRun, extraPrompt: string | undefined): void {
+  const trimmedPrompt = extraPrompt?.trim();
+  if (!trimmedPrompt) {
+    return;
+  }
+
+  const existingPrompt = followupRun.run.extraSystemPrompt?.trim();
+  if (existingPrompt?.includes(trimmedPrompt)) {
+    return;
+  }
+
+  followupRun.run.extraSystemPrompt = [existingPrompt, trimmedPrompt].filter(Boolean).join("\n\n");
+}
+
+function appendPostCompactionContinuationPrompt(params: {
+  followupRun: FollowupRun;
+  summary?: string;
+  sessionId?: string;
+  sessionEntry?: SessionEntry;
+  sessionKey?: string;
+  storePath?: string;
+}): void {
+  const summary = params.summary?.trim();
+  if (!summary) {
+    return;
+  }
+
+  const transcriptPath =
+    resolveSessionLogPath(
+      params.sessionId,
+      params.sessionEntry,
+      params.sessionKey,
+      params.storePath ? { storePath: params.storePath } : undefined,
+    ) ?? params.followupRun.run.sessionFile;
+
+  appendExtraSystemPrompt(
+    params.followupRun,
+    buildCompactionContinuationMessage({
+      summary,
+      transcriptPath,
+      recentMessagesPreserved: true,
+      suppressFollowUpQuestions: true,
+    }),
+  );
+}
+
 async function appendPostCompactionRefreshPrompt(params: {
   cfg: OpenClawConfig;
   followupRun: FollowupRun;
@@ -172,14 +219,7 @@ async function appendPostCompactionRefreshPrompt(params: {
     return;
   }
 
-  const existingPrompt = params.followupRun.run.extraSystemPrompt?.trim();
-  if (existingPrompt?.includes(refreshPrompt)) {
-    return;
-  }
-
-  params.followupRun.run.extraSystemPrompt = [existingPrompt, refreshPrompt]
-    .filter(Boolean)
-    .join("\n\n");
+  appendExtraSystemPrompt(params.followupRun, refreshPrompt);
 }
 
 async function readSessionLogSnapshot(params: {
@@ -455,6 +495,14 @@ export async function runPreflightCompactionIfNeeded(params: {
     sessionKey: params.sessionKey,
     storePath: params.storePath,
     tokensAfter: result.result?.tokensAfter,
+  });
+  appendPostCompactionContinuationPrompt({
+    followupRun: params.followupRun,
+    summary: result.result?.summary,
+    sessionId: entry.sessionId,
+    sessionEntry: entry,
+    sessionKey: params.sessionKey,
+    storePath: params.storePath,
   });
   await appendPostCompactionRefreshPrompt({
     cfg: params.cfg,

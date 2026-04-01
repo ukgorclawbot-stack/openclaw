@@ -821,8 +821,18 @@ describe("createFollowupRunner compaction", () => {
     await runner(queued);
 
     expect(compactEmbeddedPiSessionMock).toHaveBeenCalledOnce();
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain(
+      "This session is being continued from a previous conversation that ran out of context.",
+    );
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain("compacted");
+    expect(embeddedCalls[0]?.extraSystemPrompt).toContain(transcriptPath);
     expect(embeddedCalls[0]?.extraSystemPrompt).toContain("Post-compaction context refresh");
     expect(embeddedCalls[0]?.extraSystemPrompt).toContain("Read AGENTS.md before replying.");
+    expect(
+      (embeddedCalls[0]?.extraSystemPrompt ?? "").indexOf("continued from a previous conversation"),
+    ).toBeLessThan(
+      (embeddedCalls[0]?.extraSystemPrompt ?? "").indexOf("Post-compaction context refresh"),
+    );
 
     const store = loadSessionStore(storePath, { skipCache: true });
     expect(store.main?.compactionCount).toBe(2);
